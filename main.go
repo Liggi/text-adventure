@@ -18,7 +18,7 @@ type model struct {
 
 func initialModel() model {
 	return model{
-		messages: []string{"Welcome to the text adventure! Type something to begin..."},
+		messages: []string{},
 		input:    "",
 		cursor:   0,
 	}
@@ -44,6 +44,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(m.input) != "" {
 				m.messages = append(m.messages, "> "+m.input)
 				m.messages = append(m.messages, "You said: "+m.input)
+				m.messages = append(m.messages, "")
 				m.input = ""
 			}
 			return m, nil
@@ -66,12 +67,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	var s strings.Builder
-
-	chatHeight := m.height - 4
-	if chatHeight < 1 {
-		chatHeight = 10
-	}
+	inputHeight := 3
+	chatHeight := m.height - inputHeight
+	rightWidth := m.width
 
 	messageStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("7")).
@@ -88,27 +86,46 @@ func (m model) View() string {
 		Padding(0, 1).
 		Width(m.width - 4)
 
-	s.WriteString("\n")
+	chatPanel := lipgloss.NewStyle().
+		Width(rightWidth).
+		Height(chatHeight).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("8")).
+		Padding(1)
 
+	var chatContent strings.Builder
+	
 	visibleMessages := m.messages
-	if len(visibleMessages) > chatHeight {
-		visibleMessages = visibleMessages[len(visibleMessages)-chatHeight:]
+	maxMessages := chatHeight - 2
+	if maxMessages < 1 {
+		maxMessages = 1
+	}
+	
+	if len(visibleMessages) > maxMessages {
+		visibleMessages = visibleMessages[len(visibleMessages)-maxMessages:]
 	}
 
-	for _, message := range visibleMessages {
-		if strings.HasPrefix(message, "> ") {
-			s.WriteString(userStyle.Render(message) + "\n")
-		} else {
-			s.WriteString(messageStyle.Render(message) + "\n")
+	paddingLines := maxMessages - len(visibleMessages)
+	if paddingLines > 0 {
+		for i := 0; i < paddingLines; i++ {
+			chatContent.WriteString("\n")
 		}
 	}
 
-	s.WriteString("\n")
-	s.WriteString(inputStyle.Render(m.input + "│"))
-	s.WriteString("\n\n")
-	s.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Render("Press 'q' or Ctrl+C to quit"))
+	for _, message := range visibleMessages {
+		if message == "" {
+			chatContent.WriteString("\n")
+		} else if strings.HasPrefix(message, "> ") {
+			chatContent.WriteString(userStyle.Render(message) + "\n")
+		} else {
+			chatContent.WriteString(messageStyle.Render(message) + "\n")
+		}
+	}
 
-	return s.String()
+	chat := chatPanel.Render(chatContent.String())
+	input := inputStyle.Render(m.input + "│")
+
+	return chat + "\n" + input
 }
 
 func main() {
