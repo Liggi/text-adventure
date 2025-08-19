@@ -5,17 +5,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"        // Terminal UI framework for Go
-	"github.com/charmbracelet/lipgloss"             // Styling library for terminal UIs
-	"github.com/sashabaranov/go-openai"             // OpenAI API client
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/sashabaranov/go-openai"
 )
 
 type llmResponseMsg struct {
@@ -24,12 +26,21 @@ type llmResponseMsg struct {
 }
 
 type llmStreamChunkMsg struct {
-	chunk  string
-	stream *openai.ChatCompletionStream
-	debug  bool
+	chunk         string
+	stream        *openai.ChatCompletionStream
+	debug         bool
+	completionCtx *streamStartedMsg
 }
 
-type llmStreamCompleteMsg struct{}
+type llmStreamCompleteMsg struct {
+	world        WorldState
+	userInput    string
+	systemPrompt string
+	response     string
+	startTime    time.Time
+	logger       *CompletionLogger
+	debug        bool
+}
 
 type animationTickMsg struct{}
 
@@ -60,6 +71,7 @@ type model struct {
 	animationFrame int
 	world          WorldState
 	gameHistory    []string // Last few exchanges for LLM context
+	logger         *CompletionLogger
 }
 
 func initialModel() model {
@@ -77,6 +89,12 @@ func initialModel() model {
 		if err == nil {
 			log.SetOutput(logFile)
 		}
+	}
+	
+	logger, err := NewCompletionLogger()
+	if err != nil {
+		fmt.Printf("Failed to initialize completion logger: %v\n", err)
+		os.Exit(1)
 	}
 	
 	world := WorldState{
@@ -106,6 +124,7 @@ func initialModel() model {
 		debug:       debugMode,
 		world:       world,
 		gameHistory: []string{},
+		logger:      logger,
 	}
 }
 
@@ -155,12 +174,13 @@ func (m *model) debugLog(msg string) {
 	}
 }
 
-func startLLMStream(client *openai.Client, userInput string, world WorldState, gameHistory []string, debug bool) tea.Cmd {
+func startLLMStream(client *openai.Client, userInput string, world WorldState, gameHistory []string, logger *CompletionLogger, debug bool) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
 			log.Printf("Starting LLM stream with input: %q", userInput)
 		}
 		
+		startTime := time.Now()
 		worldContext := buildWorldContext(world, gameHistory)
 		systemPrompt := `You are both narrator and world simulator for a text adventure game. You have complete knowledge of the world state.
 
@@ -198,18 +218,29 @@ Rules:
 			return llmResponseMsg{response: "", err: err}
 		}
 		
-		// Store stream in a way we can access it from readNextChunk
-		// For simplicity, we'll create a streaming state message
-		return streamStartedMsg{stream: stream, debug: debug}
+		return streamStartedMsg{
+			stream:       stream,
+			debug:        debug,
+			world:        world,
+			userInput:    userInput,
+			systemPrompt: systemPrompt,
+			startTime:    startTime,
+			logger:       logger,
+		}
 	}
 }
 
 type streamStartedMsg struct {
-	stream *openai.ChatCompletionStream
-	debug  bool
+	stream       *openai.ChatCompletionStream
+	debug        bool
+	world        WorldState
+	userInput    string
+	systemPrompt string
+	startTime    time.Time
+	logger       *CompletionLogger
 }
 
-func readNextChunk(stream *openai.ChatCompletionStream, debug bool) tea.Cmd {
+func readNextChunk(stream *openai.ChatCompletionStream, debug bool, completionCtx *streamStartedMsg, fullResponse string) tea.Cmd {
 	return func() tea.Msg {
 		response, err := stream.Recv()
 		
@@ -218,7 +249,29 @@ func readNextChunk(stream *openai.ChatCompletionStream, debug bool) tea.Cmd {
 				log.Println("Stream finished")
 			}
 			stream.Close()
-			return llmStreamCompleteMsg{}
+			
+			responseTime := time.Since(completionCtx.startTime)
+			metadata := CompletionMetadata{
+				Model:         "gpt-5-2025-08-07",
+				MaxTokens:     200,
+				ResponseTime:  responseTime,
+				StreamingUsed: true,
+			}
+			
+			// Best effort logging - don't fail if logging fails
+			if logErr := completionCtx.logger.LogCompletion(completionCtx.world, completionCtx.userInput, completionCtx.systemPrompt, fullResponse, metadata); logErr != nil && debug {
+				log.Printf("Failed to log completion: %v", logErr)
+			}
+			
+			return llmStreamCompleteMsg{
+				world:        completionCtx.world,
+				userInput:    completionCtx.userInput,
+				systemPrompt: completionCtx.systemPrompt,
+				response:     fullResponse,
+				startTime:    completionCtx.startTime,
+				logger:       completionCtx.logger,
+				debug:        debug,
+			}
 		}
 		
 		if err != nil {
@@ -234,68 +287,14 @@ func readNextChunk(stream *openai.ChatCompletionStream, debug bool) tea.Cmd {
 			if debug {
 				log.Printf("Stream chunk: %q", chunk)
 			}
-			return llmStreamChunkMsg{chunk: chunk, stream: stream, debug: debug}
+			return llmStreamChunkMsg{chunk: chunk, stream: stream, debug: debug, completionCtx: completionCtx}
 		}
 		
 		// Empty chunk, keep reading
-		return readNextChunk(stream, debug)()
+		return readNextChunk(stream, debug, completionCtx, fullResponse)()
 	}
 }
 
-func callLLMAsync(client *openai.Client, userInput string, world WorldState, gameHistory []string, debug bool) tea.Cmd {
-	return func() tea.Msg {
-		if debug {
-			log.Printf("Starting LLM async call with input: %q", userInput)
-		}
-		
-		worldContext := buildWorldContext(world, gameHistory)
-		systemPrompt := `You are both narrator and world simulator for a text adventure game. You have complete knowledge of the world state.
-
-Your job: Respond to player actions with 2-4 sentence vivid narration that feels natural and immersive.
-
-Rules:
-- Stay consistent with the provided world state
-- If action is impossible, explain why and suggest alternatives
-- Keep responses concise but atmospheric
-- Don't change the world state (that comes later)
-- Respond as if you can see everything in the current location`
-
-		req := openai.ChatCompletionRequest{
-			Model: "gpt-5-2025-08-07",
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role: openai.ChatMessageRoleSystem,
-					Content: systemPrompt,
-				},
-				{
-					Role: openai.ChatMessageRoleUser,
-					Content: worldContext + "PLAYER ACTION: " + userInput,
-				},
-			},
-			MaxCompletionTokens: 200,
-			ReasoningEffort:     "minimal",
-			Stream:              false,
-		}
-		
-		response, err := client.CreateChatCompletion(context.Background(), req)
-		if err != nil {
-			if debug {
-				log.Printf("LLM error: %v", err)
-			}
-			return llmResponseMsg{response: "", err: err}
-		}
-		
-		if len(response.Choices) > 0 {
-			content := response.Choices[0].Message.Content
-			if debug {
-				log.Printf("LLM response: %q", content)
-			}
-			return llmResponseMsg{response: content, err: nil}
-		}
-		
-		return llmResponseMsg{response: "", err: fmt.Errorf("no response from LLM")}
-	}
-}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -318,7 +317,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.currentResponse = ""
 			m.messages = append(m.messages, "")
 		}
-		return m, readNextChunk(msg.stream, msg.debug)
+		return m, readNextChunk(msg.stream, msg.debug, &msg, "")
 
 	case llmStreamChunkMsg:
 		if m.streaming {
@@ -327,7 +326,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.messages[len(m.messages)-1] = m.currentResponse
 			}
 		}
-		return m, readNextChunk(msg.stream, msg.debug)
+		return m, readNextChunk(msg.stream, msg.debug, msg.completionCtx, m.currentResponse)
 
 	case llmStreamCompleteMsg:
 		if m.streaming {
@@ -394,7 +393,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.messages = append(m.messages, "LOADING_ANIMATION")
 				
 				// Use streaming by default - change to callLLMAsync for non-streaming
-				return m, tea.Batch(startLLMStream(m.client, userInput, m.world, m.gameHistory, m.debug), animationTimer())
+				return m, tea.Batch(startLLMStream(m.client, userInput, m.world, m.gameHistory, m.logger, m.debug), animationTimer())
 			}
 			return m, nil
 
@@ -519,8 +518,115 @@ func (m model) View() string {
 }
 
 func main() {
+	// Handle command line flags
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "review", "--review":
+			runReviewMode()
+			return
+		case "rate":
+			if len(os.Args) < 4 {
+				fmt.Println("Usage: go run . rate <id> <rating> [notes]")
+				return
+			}
+			runRatingMode()
+			return
+		}
+	}
+	
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v", err)
 	}
+}
+
+func runReviewMode() {
+	logger, err := NewCompletionLogger()
+	if err != nil {
+		fmt.Printf("Failed to open completion database: %v\n", err)
+		return
+	}
+	defer logger.Close()
+	
+	completions, err := logger.GetRecentCompletions(10)
+	if err != nil {
+		fmt.Printf("Failed to get completions: %v\n", err)
+		return
+	}
+	
+	if len(completions) == 0 {
+		fmt.Println("No completions found. Play the game first to generate data!")
+		return
+	}
+	
+	fmt.Printf("Recent completions (%d):\n\n", len(completions))
+	
+	for _, comp := range completions {
+		var metadata CompletionMetadata
+		if err := json.Unmarshal([]byte(comp.Metadata), &metadata); err == nil {
+			fmt.Printf("[%d] %s | %v | %s\n", 
+				comp.ID, 
+				comp.Timestamp.Format("15:04:05"),
+				metadata.ResponseTime,
+				comp.UserInput)
+		} else {
+			fmt.Printf("[%d] %s | %s\n", comp.ID, comp.Timestamp.Format("15:04:05"), comp.UserInput)
+		}
+		
+		fmt.Printf("Response: %s\n", comp.Response)
+		if comp.Rating != nil {
+			fmt.Printf("Rating: %d/5", *comp.Rating)
+			if comp.Notes != nil {
+				fmt.Printf(" - %s", *comp.Notes)
+			}
+		} else {
+			fmt.Printf("Rating: not rated")
+		}
+		fmt.Println("\n" + strings.Repeat("-", 50))
+	}
+	
+	fmt.Println("\nTo rate a completion: go run . rate <id> <rating> [notes]")
+}
+
+func runRatingMode() {
+	id, err := strconv.Atoi(os.Args[2])
+	if err != nil {
+		fmt.Printf("Invalid ID: %v\n", err)
+		return
+	}
+	
+	rating, err := strconv.Atoi(os.Args[3])
+	if err != nil {
+		fmt.Printf("Invalid rating: %v\n", err)
+		return
+	}
+	
+	if rating < 1 || rating > 5 {
+		fmt.Println("Rating must be between 1 and 5")
+		return
+	}
+	
+	var notes string
+	if len(os.Args) > 4 {
+		notes = strings.Join(os.Args[4:], " ")
+	}
+	
+	logger, err := NewCompletionLogger()
+	if err != nil {
+		fmt.Printf("Failed to open completion database: %v\n", err)
+		return
+	}
+	defer logger.Close()
+	
+	err = logger.RateCompletion(id, rating, notes)
+	if err != nil {
+		fmt.Printf("Failed to rate completion: %v\n", err)
+		return
+	}
+	
+	fmt.Printf("Rated completion %d as %d/5", id, rating)
+	if notes != "" {
+		fmt.Printf(" with notes: %s", notes)
+	}
+	fmt.Println()
 }
