@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"        // Terminal UI framework for Go
 	"github.com/charmbracelet/lipgloss"             // Styling library for terminal UIs
@@ -30,6 +31,8 @@ type llmStreamChunkMsg struct {
 
 type llmStreamCompleteMsg struct{}
 
+type animationTickMsg struct{}
+
 type model struct {
 	messages       []string
 	input          string
@@ -41,6 +44,7 @@ type model struct {
 	loading        bool
 	streaming      bool
 	currentResponse string
+	animationFrame int
 }
 
 func initialModel() model {
@@ -71,6 +75,18 @@ func initialModel() model {
 
 func (m model) Init() tea.Cmd {
 	return nil
+}
+
+func animationTimer() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+		return animationTickMsg{}
+	})
+}
+
+func getLoadingAnimation(frame int) string {
+	// "arc" spinner from cli-spinners - battle-tested smooth circular motion
+	arc := []string{"◜", "◠", "◝", "◞", "◡", "◟"}
+	return arc[frame%len(arc)]
 }
 
 func (m *model) debugLog(msg string) {
@@ -205,6 +221,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
+	case animationTickMsg:
+		if m.loading {
+			m.animationFrame++
+			return m, animationTimer()
+		}
+		return m, nil
+
 	case streamStartedMsg:
 		if m.loading {
 			m.messages = m.messages[:len(m.messages)-1]
@@ -262,12 +285,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(m.input) != "" && !m.loading {
 				userInput := m.input
 				m.messages = append(m.messages, "> "+userInput)
+				m.messages = append(m.messages, "")
 				m.input = ""
 				m.loading = true
-				m.messages = append(m.messages, "Thinking...")
+				m.animationFrame = 0
+				m.messages = append(m.messages, "LOADING_ANIMATION")
 				
 				// Use streaming by default - change to callLLMAsync for non-streaming
-				return m, startLLMStream(m.client, userInput, m.debug)
+				return m, tea.Batch(startLLMStream(m.client, userInput, m.debug), animationTimer())
 			}
 			return m, nil
 
@@ -362,8 +387,7 @@ func (m model) View() string {
 		Foreground(lipgloss.Color("11"))
 
 	loadingStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("8")).
-		Italic(true)
+		Foreground(lipgloss.Color("6"))
 
 	contentWidth := rightWidth - 4 // Account for border and padding
 	
@@ -376,8 +400,9 @@ func (m model) View() string {
 		} else if strings.HasPrefix(message, "[DEBUG] ") {
 			wrappedText := wrapAndIndent(message, contentWidth, " ")
 			chatContent.WriteString(debugStyle.Render(wrappedText) + "\n")
-		} else if message == "Thinking..." {
-			wrappedText := wrapAndIndent(message, contentWidth, " ")
+		} else if message == "LOADING_ANIMATION" {
+			animationText := getLoadingAnimation(m.animationFrame)
+			wrappedText := wrapAndIndent(animationText, contentWidth, " ")
 			chatContent.WriteString(loadingStyle.Render(wrappedText) + "\n")
 		} else {
 			wrappedText := wrapAndIndent(message, contentWidth, " ")
