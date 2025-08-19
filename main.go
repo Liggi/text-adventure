@@ -33,6 +33,19 @@ type llmStreamCompleteMsg struct{}
 
 type animationTickMsg struct{}
 
+type WorldState struct {
+	Location  string
+	Inventory []string
+	Locations map[string]LocationInfo
+}
+
+type LocationInfo struct {
+	Title       string
+	Description string
+	Items       []string
+	Exits       map[string]string
+}
+
 type model struct {
 	messages       []string
 	input          string
@@ -45,6 +58,8 @@ type model struct {
 	streaming      bool
 	currentResponse string
 	animationFrame int
+	world          WorldState
+	gameHistory    []string // Last few exchanges for LLM context
 }
 
 func initialModel() model {
@@ -64,12 +79,33 @@ func initialModel() model {
 		}
 	}
 	
+	world := WorldState{
+		Location:  "foyer",
+		Inventory: []string{},
+		Locations: map[string]LocationInfo{
+			"foyer": {
+				Title:       "Old Foyer",
+				Description: "A dusty foyer with motes drifting in shafts of light",
+				Items:       []string{"silver key"},
+				Exits:       map[string]string{"north": "study"},
+			},
+			"study": {
+				Title:       "Quiet Study",
+				Description: "A quiet study with a heavy oak desk",
+				Items:       []string{},
+				Exits:       map[string]string{"south": "foyer"},
+			},
+		},
+	}
+
 	return model{
-		messages: []string{},
-		input:    "",
-		cursor:   0,
-		client:   client,
-		debug:    debugMode,
+		messages:    []string{},
+		input:       "",
+		cursor:      0,
+		client:      client,
+		debug:       debugMode,
+		world:       world,
+		gameHistory: []string{},
 	}
 }
 
@@ -89,6 +125,29 @@ func getLoadingAnimation(frame int) string {
 	return arc[frame%len(arc)]
 }
 
+func buildWorldContext(world WorldState, gameHistory []string) string {
+	currentLoc := world.Locations[world.Location]
+	context := fmt.Sprintf(`WORLD STATE:
+Current Location: %s (%s)
+%s
+
+Available Items Here: %v
+Available Exits: %v
+Player Inventory: %v
+
+`, currentLoc.Title, world.Location, currentLoc.Description, currentLoc.Items, currentLoc.Exits, world.Inventory)
+
+	if len(gameHistory) > 0 {
+		context += "RECENT CONVERSATION:\n"
+		for _, exchange := range gameHistory {
+			context += exchange + "\n"
+		}
+		context += "\n"
+	}
+
+	return context
+}
+
 func (m *model) debugLog(msg string) {
 	if m.debug {
 		log.Println(msg)
@@ -96,22 +155,34 @@ func (m *model) debugLog(msg string) {
 	}
 }
 
-func startLLMStream(client *openai.Client, userInput string, debug bool) tea.Cmd {
+func startLLMStream(client *openai.Client, userInput string, world WorldState, gameHistory []string, debug bool) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
 			log.Printf("Starting LLM stream with input: %q", userInput)
 		}
 		
+		worldContext := buildWorldContext(world, gameHistory)
+		systemPrompt := `You are both narrator and world simulator for a text adventure game. You have complete knowledge of the world state.
+
+Your job: Respond to player actions with 2-4 sentence vivid narration that feels natural and immersive.
+
+Rules:
+- Stay consistent with the provided world state
+- If action is impossible, explain why and suggest alternatives
+- Keep responses concise but atmospheric
+- Don't change the world state (that comes later)
+- Respond as if you can see everything in the current location`
+
 		req := openai.ChatCompletionRequest{
 			Model: "gpt-5-2025-08-07",
 			Messages: []openai.ChatCompletionMessage{
 				{
 					Role: openai.ChatMessageRoleSystem,
-					Content: "You are a text adventure narrator. Create engaging, immersive responses to player actions. Keep responses concise but vivid. The player is exploring a mysterious world.",
+					Content: systemPrompt,
 				},
 				{
 					Role: openai.ChatMessageRoleUser,
-					Content: userInput,
+					Content: worldContext + "PLAYER ACTION: " + userInput,
 				},
 			},
 			MaxCompletionTokens: 200,
@@ -171,22 +242,34 @@ func readNextChunk(stream *openai.ChatCompletionStream, debug bool) tea.Cmd {
 	}
 }
 
-func callLLMAsync(client *openai.Client, userInput string, debug bool) tea.Cmd {
+func callLLMAsync(client *openai.Client, userInput string, world WorldState, gameHistory []string, debug bool) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
 			log.Printf("Starting LLM async call with input: %q", userInput)
 		}
 		
+		worldContext := buildWorldContext(world, gameHistory)
+		systemPrompt := `You are both narrator and world simulator for a text adventure game. You have complete knowledge of the world state.
+
+Your job: Respond to player actions with 2-4 sentence vivid narration that feels natural and immersive.
+
+Rules:
+- Stay consistent with the provided world state
+- If action is impossible, explain why and suggest alternatives
+- Keep responses concise but atmospheric
+- Don't change the world state (that comes later)
+- Respond as if you can see everything in the current location`
+
 		req := openai.ChatCompletionRequest{
 			Model: "gpt-5-2025-08-07",
 			Messages: []openai.ChatCompletionMessage{
 				{
 					Role: openai.ChatMessageRoleSystem,
-					Content: "You are a text adventure narrator. Create engaging, immersive responses to player actions. Keep responses concise but vivid. The player is exploring a mysterious world.",
+					Content: systemPrompt,
 				},
 				{
 					Role: openai.ChatMessageRoleUser,
-					Content: userInput,
+					Content: worldContext + "PLAYER ACTION: " + userInput,
 				},
 			},
 			MaxCompletionTokens: 200,
@@ -250,6 +333,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.streaming {
 			m.streaming = false
 			m.loading = false
+			
+			// Add the complete response to game history
+			if len(m.messages) > 0 && m.currentResponse != "" {
+				m.gameHistory = append(m.gameHistory, "Narrator: "+m.currentResponse)
+				// Keep only last 3 exchanges (6 entries: player + narrator pairs)
+				if len(m.gameHistory) > 6 {
+					m.gameHistory = m.gameHistory[len(m.gameHistory)-6:]
+				}
+			}
+			
 			m.messages = append(m.messages, "")
 		}
 		return m, nil
@@ -258,12 +351,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.loading && !m.streaming {
 			m.messages = m.messages[:len(m.messages)-1]
 			if msg.err != nil {
-				m.messages = append(m.messages, fmt.Sprintf("Error: %v", msg.err))
+				errorMsg := fmt.Sprintf("Error: %v", msg.err)
+				m.messages = append(m.messages, errorMsg)
+				m.gameHistory = append(m.gameHistory, "Error: "+msg.err.Error())
 			} else {
 				m.messages = append(m.messages, msg.response)
+				m.gameHistory = append(m.gameHistory, "Narrator: "+msg.response)
 			}
 			m.messages = append(m.messages, "")
 			m.loading = false
+			
+			// Keep only last 3 exchanges (6 entries: player + narrator pairs)
+			if len(m.gameHistory) > 6 {
+				m.gameHistory = m.gameHistory[len(m.gameHistory)-6:]
+			}
 		} else if m.streaming {
 			m.streaming = false
 			m.loading = false
@@ -286,13 +387,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				userInput := m.input
 				m.messages = append(m.messages, "> "+userInput)
 				m.messages = append(m.messages, "")
+				m.gameHistory = append(m.gameHistory, "Player: "+userInput)
 				m.input = ""
 				m.loading = true
 				m.animationFrame = 0
 				m.messages = append(m.messages, "LOADING_ANIMATION")
 				
 				// Use streaming by default - change to callLLMAsync for non-streaming
-				return m, tea.Batch(startLLMStream(m.client, userInput, m.debug), animationTimer())
+				return m, tea.Batch(startLLMStream(m.client, userInput, m.world, m.gameHistory, m.debug), animationTimer())
 			}
 			return m, nil
 
