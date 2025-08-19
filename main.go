@@ -1,15 +1,20 @@
+// Text Adventure Game with GPT-5 Integration
+// This is a terminal-based text adventure game that uses OpenAI's GPT-5 model
+// to generate dynamic responses to player actions. Built with Bubble Tea TUI framework.
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/sashabaranov/go-openai"
+	tea "github.com/charmbracelet/bubbletea"        // Terminal UI framework for Go
+	"github.com/charmbracelet/lipgloss"             // Styling library for terminal UIs
+	"github.com/sashabaranov/go-openai"             // OpenAI API client
 )
 
 type llmResponseMsg struct {
@@ -17,15 +22,25 @@ type llmResponseMsg struct {
 	err      error
 }
 
+type llmStreamChunkMsg struct {
+	chunk  string
+	stream *openai.ChatCompletionStream
+	debug  bool
+}
+
+type llmStreamCompleteMsg struct{}
+
 type model struct {
-	messages []string
-	input    string
-	cursor   int
-	width    int
-	height   int
-	client   *openai.Client
-	debug    bool
-	loading  bool
+	messages       []string
+	input          string
+	cursor         int
+	width          int
+	height         int
+	client         *openai.Client
+	debug          bool
+	loading        bool
+	streaming      bool
+	currentResponse string
 }
 
 func initialModel() model {
@@ -65,51 +80,121 @@ func (m *model) debugLog(msg string) {
 	}
 }
 
-func callLLMAsync(client *openai.Client, userInput string, debug bool) tea.Cmd {
+func startLLMStream(client *openai.Client, userInput string, debug bool) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
-			log.Printf("Calling LLM with input: %q", userInput)
+			log.Printf("Starting LLM stream with input: %q", userInput)
 		}
 		
-		resp, err := client.CreateChatCompletion(
-			context.Background(),
-			openai.ChatCompletionRequest{
-				Model: "gpt-5-2025-08-07",
-				Messages: []openai.ChatCompletionMessage{
-					{
-						Role: openai.ChatMessageRoleSystem,
-						Content: "You are a text adventure narrator. Create engaging, immersive responses to player actions. Keep responses concise but vivid. The player is exploring a mysterious world.",
-					},
-					{
-						Role: openai.ChatMessageRoleUser,
-						Content: userInput,
-					},
+		req := openai.ChatCompletionRequest{
+			Model: "gpt-5-2025-08-07",
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role: openai.ChatMessageRoleSystem,
+					Content: "You are a text adventure narrator. Create engaging, immersive responses to player actions. Keep responses concise but vivid. The player is exploring a mysterious world.",
 				},
-				MaxCompletionTokens: 200,
-				ReasoningEffort:     "minimal",
+				{
+					Role: openai.ChatMessageRoleUser,
+					Content: userInput,
+				},
 			},
-		)
+			MaxCompletionTokens: 200,
+			ReasoningEffort:     "minimal",
+			Stream:              true,
+		}
 		
+		stream, err := client.CreateChatCompletionStream(context.Background(), req)
 		if err != nil {
 			if debug {
-				log.Printf("API error: %v", err)
+				log.Printf("Stream creation error: %v", err)
 			}
 			return llmResponseMsg{response: "", err: err}
 		}
 		
-		if debug {
-			log.Printf("API response received, choices: %d", len(resp.Choices))
-		}
+		// Store stream in a way we can access it from readNextChunk
+		// For simplicity, we'll create a streaming state message
+		return streamStartedMsg{stream: stream, debug: debug}
+	}
+}
+
+type streamStartedMsg struct {
+	stream *openai.ChatCompletionStream
+	debug  bool
+}
+
+func readNextChunk(stream *openai.ChatCompletionStream, debug bool) tea.Cmd {
+	return func() tea.Msg {
+		response, err := stream.Recv()
 		
-		if len(resp.Choices) > 0 {
-			response := strings.TrimSpace(resp.Choices[0].Message.Content)
+		if errors.Is(err, io.EOF) {
 			if debug {
-				log.Printf("Response content: %q", response)
+				log.Println("Stream finished")
 			}
-			return llmResponseMsg{response: response, err: nil}
+			stream.Close()
+			return llmStreamCompleteMsg{}
 		}
 		
-		return llmResponseMsg{response: "The adventure continues...", err: nil}
+		if err != nil {
+			if debug {
+				log.Printf("Stream error: %v", err)
+			}
+			stream.Close()
+			return llmResponseMsg{response: "", err: err}
+		}
+		
+		if len(response.Choices) > 0 && response.Choices[0].Delta.Content != "" {
+			chunk := response.Choices[0].Delta.Content
+			if debug {
+				log.Printf("Stream chunk: %q", chunk)
+			}
+			return llmStreamChunkMsg{chunk: chunk, stream: stream, debug: debug}
+		}
+		
+		// Empty chunk, keep reading
+		return readNextChunk(stream, debug)()
+	}
+}
+
+func callLLMAsync(client *openai.Client, userInput string, debug bool) tea.Cmd {
+	return func() tea.Msg {
+		if debug {
+			log.Printf("Starting LLM async call with input: %q", userInput)
+		}
+		
+		req := openai.ChatCompletionRequest{
+			Model: "gpt-5-2025-08-07",
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role: openai.ChatMessageRoleSystem,
+					Content: "You are a text adventure narrator. Create engaging, immersive responses to player actions. Keep responses concise but vivid. The player is exploring a mysterious world.",
+				},
+				{
+					Role: openai.ChatMessageRoleUser,
+					Content: userInput,
+				},
+			},
+			MaxCompletionTokens: 200,
+			ReasoningEffort:     "minimal",
+			Stream:              false,
+		}
+		
+		response, err := client.CreateChatCompletion(context.Background(), req)
+		if err != nil {
+			if debug {
+				log.Printf("LLM error: %v", err)
+			}
+			return llmResponseMsg{response: "", err: err}
+		}
+		
+		if len(response.Choices) > 0 {
+			content := response.Choices[0].Message.Content
+			if debug {
+				log.Printf("LLM response: %q", content)
+			}
+			return llmResponseMsg{response: content, err: nil}
+		}
+		
+		return llmResponseMsg{response: "", err: fmt.Errorf("no response from LLM")}
 	}
 }
 
@@ -120,8 +205,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
-	case llmResponseMsg:
+	case streamStartedMsg:
 		if m.loading {
+			m.messages = m.messages[:len(m.messages)-1]
+			m.streaming = true
+			m.currentResponse = ""
+			m.messages = append(m.messages, "")
+		}
+		return m, readNextChunk(msg.stream, msg.debug)
+
+	case llmStreamChunkMsg:
+		if m.streaming {
+			m.currentResponse += msg.chunk
+			if len(m.messages) > 0 {
+				m.messages[len(m.messages)-1] = m.currentResponse
+			}
+		}
+		return m, readNextChunk(msg.stream, msg.debug)
+
+	case llmStreamCompleteMsg:
+		if m.streaming {
+			m.streaming = false
+			m.loading = false
+			m.messages = append(m.messages, "")
+		}
+		return m, nil
+
+	case llmResponseMsg:
+		if m.loading && !m.streaming {
 			m.messages = m.messages[:len(m.messages)-1]
 			if msg.err != nil {
 				m.messages = append(m.messages, fmt.Sprintf("Error: %v", msg.err))
@@ -130,6 +241,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.messages = append(m.messages, "")
 			m.loading = false
+		} else if m.streaming {
+			m.streaming = false
+			m.loading = false
+			if msg.err != nil {
+				if len(m.messages) > 0 {
+					m.messages[len(m.messages)-1] = fmt.Sprintf("Error: %v", msg.err)
+				}
+				m.messages = append(m.messages, "")
+			}
 		}
 		return m, nil
 
@@ -146,7 +266,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.loading = true
 				m.messages = append(m.messages, "Thinking...")
 				
-				return m, callLLMAsync(m.client, userInput, m.debug)
+				// Use streaming by default - change to callLLMAsync for non-streaming
+				return m, startLLMStream(m.client, userInput, m.debug)
 			}
 			return m, nil
 
@@ -167,19 +288,43 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func wrapAndIndent(text string, width int, indent string) string {
+	if len(text) <= width {
+		return indent + text
+	}
+	
+	var result strings.Builder
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return indent + text
+	}
+	
+	currentLine := indent + words[0]
+	
+	for _, word := range words[1:] {
+		if len(currentLine)+1+len(word) <= width {
+			currentLine += " " + word
+		} else {
+			result.WriteString(currentLine + "\n")
+			currentLine = indent + word
+		}
+	}
+	
+	result.WriteString(currentLine)
+	return result.String()
+}
+
 func (m model) View() string {
 	inputHeight := 3
 	chatHeight := m.height - inputHeight
 	rightWidth := m.width
 
 	messageStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("7")).
-		Padding(0, 1)
+		Foreground(lipgloss.Color("7"))
 
 	userStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("12")).
-		Bold(true).
-		Padding(0, 1)
+		Bold(true)
 
 	inputStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -214,25 +359,29 @@ func (m model) View() string {
 	}
 
 	debugStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("11")).
-		Padding(0, 1)
+		Foreground(lipgloss.Color("11"))
 
 	loadingStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("8")).
-		Italic(true).
-		Padding(0, 1)
+		Italic(true)
 
+	contentWidth := rightWidth - 4 // Account for border and padding
+	
 	for _, message := range visibleMessages {
 		if message == "" {
 			chatContent.WriteString("\n")
 		} else if strings.HasPrefix(message, "> ") {
-			chatContent.WriteString(userStyle.Render(message) + "\n")
+			wrappedText := wrapAndIndent(message, contentWidth, " ")
+			chatContent.WriteString(userStyle.Render(wrappedText) + "\n")
 		} else if strings.HasPrefix(message, "[DEBUG] ") {
-			chatContent.WriteString(debugStyle.Render(message) + "\n")
+			wrappedText := wrapAndIndent(message, contentWidth, " ")
+			chatContent.WriteString(debugStyle.Render(wrappedText) + "\n")
 		} else if message == "Thinking..." {
-			chatContent.WriteString(loadingStyle.Render(message) + "\n")
+			wrappedText := wrapAndIndent(message, contentWidth, " ")
+			chatContent.WriteString(loadingStyle.Render(wrappedText) + "\n")
 		} else {
-			chatContent.WriteString(messageStyle.Render(message) + "\n")
+			wrappedText := wrapAndIndent(message, contentWidth, " ")
+			chatContent.WriteString(messageStyle.Render(wrappedText) + "\n")
 		}
 	}
 
