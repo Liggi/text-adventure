@@ -1,141 +1,160 @@
-# Text Adventure — First Room Plan (LLM-Directed)
+# Text Adventure - LLM-Directed World Mutations
 
-This plan outlines how to stand up the very first playable “room” using an LLM-directed runtime. It adapts the architecture you described (LLM as Director + JSON Patch world edits) to this Go + Bubble Tea project.
+## Comprehensive Architecture Analysis
 
-## Goals
-- Minimal, shippable loop: type input → see narration → world updates.
-- One starting location with a clear affordance path (look, take, open).
-- Human-readable `WorldDoc` as the single source of truth.
-- LLM outputs concise narration + a minimal JSON Patch.
-- Lightweight validator guards invariants (no teleport, stable IDs, etc.).
-- Turn-by-turn persistence for rewind/debugging.
+This text adventure implements the "LLM as Director" pattern, where natural language input is understood by an LLM that orchestrates world state changes through structured mutations.
 
-## Deliverables (MVP)
-- `world/seed.yaml` (or `.json`): initial `WorldDoc` with one location, one item, one door.
-- `internal/world` package: load/save doc, apply JSON Patch, validate invariants.
-- `internal/director` package: prompt assembly, LLM call, output parsing.
-- `internal/persist` package: append-only JSONL or SQLite turns (pick one).
-- TUI loop integration (existing Bubble Tea) calling the Director and rendering narration.
+### Core Architecture
 
-## WorldDoc Shape (seed)
-Use YAML (human-friendly) or JSON. Keep IDs stable; separate canonical facts from mutable state.
-
-```yaml
-world:
-  locations:
-    - id: foyer
-      title: Old Foyer
-      canonical_facts:
-        - a locked oak door leads north to the study
-        - dust motes drift in a shaft of light
-      mutable_state:
-        door_locked: true
-      exits:
-        north: study
-      entities_here: [silver_key]
-    - id: study
-      title: Quiet Study
-      canonical_facts:
-        - a heavy oak desk dominates the room
-      mutable_state: {}
-      exits:
-        south: foyer
-      entities_here: []
-  entities:
-    - id: silver_key
-      kind: item
-      affordances: [take, drop, use_on:door]
-  npcs: []
-  player:
-    location: foyer
-    inventory: []
-  clocks:
-    - id: nightfall
-      ticks_remaining: 8
-meta:
-  style: "classic interactive fiction, concise"
-  invariants:
-    - ids are stable; do not repurpose
-    - do not contradict canonical_facts without explicit retcon
-    - player cannot move through locked doors without cause
-  frontier: ["study mystery"]
+```
+┌─────────────────────────────────────────────────────┐
+│                   User Input                        │
+└──────────────────────┬──────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│              Bubble Tea UI (Go)                     │
+│  - cmd/game/ui/{model,update,view,commands}.go     │
+└──────────────────────┬──────────────────────────────┘
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│            Two-Step LLM Flow                        │
+│  1. Generate Mutations (GPT-5)                      │
+│  2. Execute via MCP → Narrate Results               │
+└──────────┬───────────────────────────┬──────────────┘
+           ▼                           ▼
+┌──────────────────────┐    ┌────────────────────────┐
+│   MCP Client (Go)    │    │  LLM Client (GPT-5)    │
+│  internal/mcp/*      │    │  internal/llm/*        │
+└──────────┬───────────┘    └────────────────────────┘
+           ▼
+┌──────────────────────────────────────────────────────┐
+│          Python MCP Server                          │
+│  services/worldstate/world_state.py                 │
+│  - Authoritative world state (JSON)                 │
+│  - Mutation tools (move, transfer, unlock)          │
+└──────────────────────────────────────────────────────┘
 ```
 
-## LLM Output Contract
-Ask the Director to return narration + JSON Patch (RFC 6902) + optional open hooks.
+### Design Principles
 
-```json
-{
-  "narration": "2–5 sentence vivid description...",
-  "world_patch": [
-    {"op":"replace","path":"/player/location","value":"study"},
-    {"op":"replace","path":"/world/locations/0/mutable_state/door_locked","value":false},
-    {"op":"add","path":"/meta/frontier/-","value":"strange ledger in desk"}
-  ],
-  "open_hooks": ["unlock desk", "read ledger"]
-}
+**The LLM is the Director of all world state changes:**
+- Users express intent in natural language (any way they want)
+- We NEVER parse user commands directly
+- The LLM understands intent and decides what should change
+- The LLM instructs specific world mutations via structured output
+- World mutations are executed through MCP tools
+
+**Data Flow:**
+```
+User Input → LLM (Director) → { Narration + World Mutations } → MCP Tools → Updated State
 ```
 
-## Step-by-Step Plan
-1) Define seed world
-- Create `world/seed.yaml` from the example above (YAML or JSON).
-- Commit to stable IDs (`foyer`, `study`, `silver_key`).
+### Current File Structure
 
-2) World package
-- `internal/world/doc.go`: structs mirroring the seed (locations, entities, player, meta).
-- `internal/world/load.go`: load/save YAML/JSON; normalize maps/slices for stable JSON pointer paths.
-- `internal/world/patch.go`: apply RFC 6902 JSON Patch (e.g., `github.com/evanphx/json-patch/v5`).
-- `internal/world/validate.go`: invariants check (stable IDs, door restrictions, non-negative clocks, exits consistent both ways if declared).
+```
+cmd/game/              # Application entry point
+├── app.go            # App initialization with MCP setup
+├── main.go           # Main entry point
+└── ui/               # Bubble Tea interface
+    ├── commands.go   # LLM orchestration & mutations (1000+ lines)
+    ├── model.go      # UI state management
+    ├── update.go     # Event handling & turn system
+    └── view.go       # Terminal rendering
 
-3) Director package
-- `internal/director/prompt.go`: build system + checklist prompt using:
-  - Current `WorldDoc`, last 2–3 turns transcript, new player input.
-  - Checklist: “Advance clocks if warranted; don’t spawn items; keep exits consistent; suggest visible affordances on failure.”
-- `internal/director/call.go`: call OpenAI client (already present) and parse JSON payload.
-- `internal/director/schema.go`: strict JSON schema validation for `narration`, `world_patch`, `open_hooks`.
+internal/             # Internal packages
+├── debug/           # Debug logging
+├── game/            # Core game types
+│   ├── history.go   # Conversation history
+│   └── world.go     # World state types
+├── llm/             # OpenAI GPT-5 client
+├── logging/         # Completion logging
+└── mcp/             # MCP client & type conversion
 
-4) Critic/validator pass (optional but recommended)
-- If `world_patch` violates invariants, either:
-  - Bounce and re-ask the Director with a short diagnostic; or
-  - Run a “critic mode” prompt that proposes the smallest corrected patch.
+services/            # External services
+├── world_state.json # Persistent world state
+└── worldstate/      # Python MCP server
+    └── world_state.py # Authoritative state & mutations
+```
 
-5) Persistence
-- Start simple: append JSONL `data/turns.jsonl` with `{turn_index, world_doc, patch, narration, ts}`.
-- Or use SQLite (`github.com/mattn/go-sqlite3`): table `turns(id INTEGER PK, ts, world_doc TEXT, patch TEXT, narration TEXT)`.
-- Add `persist.LoadLatest()` and `persist.SaveTurn()` helpers.
+### Key Features
 
-6) TUI integration
-- On startup: load latest world or `seed.yaml`; print opening narration (from `seed` or a scripted “look”).
-- On Enter: send input + transcript tail to Director; get `narration` + `world_patch`.
-- Validate; apply patch; persist; stream narration to the chat panel.
-- If invalid, show a brief in-world failure narration (from Director) and keep state unchanged.
+1. **LLM-Directed Mutations**: GPT-5 analyzes player intent and generates specific MCP tool calls
+2. **Authoritative World State**: Python MCP server maintains single source of truth
+3. **Turn-Based NPCs**: NPCs react to sensory events with AI-generated thoughts and actions
+4. **Sensory Event System**: Volume-based sound propagation between locations
+5. **Streaming Narration**: Real-time GPT-5 streaming with context-aware responses
+6. **Natural Language Freedom**: No command parsing - players can express intent however they want
 
-7) First-room acceptance tests (manual)
-- `look` in foyer returns description with exits and visible items.
-- `take key` moves `silver_key` to inventory; removes from foyer.
-- `open door` fails if locked; succeeds after using key; moves player to study on `north`.
-- `inventory` lists `silver_key` when held.
-- Clocks never go negative; IDs remain stable across turns; exits remain coherent.
+### Evolution History
 
-8) Prompts (initial draft)
-- System: “You are both narrator and world simulator. Produce 2–5 sentence narration, a minimal JSON Patch to update the provided WorldDoc, and optional open hooks. Keep IDs stable. Obey invariants. If action is impossible, narrate failure and suggest visible affordances.”
-- Checklist appended to the user message: “Advance clocks only with cause; don’t spawn items; keep exits consistent; no teleport without on-screen reason; keep narration concise.”
+The project has evolved through several architectural phases:
 
-9) Logging & debug
-- Log raw Director I/O, applied patches, and validator messages in `debug.log` (redact secrets).
-- Add a `--replay` mode to print the transcript and world deltas for debugging.
+1. **Chat Interface**: Basic Bubble Tea chat UI
+2. **LLM Integration**: GPT-5 streaming with world context
+3. **World State**: Static locations and items system
+4. **MCP Architecture**: Python server for atomic world mutations
+5. **Services Split**: Separation of UI, game logic, and world state
+6. **NPC System**: Turn-based AI characters with thoughts and actions
+7. **Sensory Events**: Sound propagation and NPC reactions
+8. **Event Accumulation**: Player-centric narration with turn cycles
 
-10) Nice-to-have next
-- Status pane (location, exits, inventory, clocks) alongside narration.
-- “GM screen” hidden notes in `meta` that are not shown to player.
-- Swap JSONL → SQLite once flow feels right.
+### Current Strengths
 
-## Ready-to-Build Checklist
-- WorldDoc seed file exists and loads.
-- Director returns valid JSON Patch for trivial actions (`look`, `take`, `open`).
-- Validator blocks illegal state transitions (e.g., walking through locked door).
-- Persistence captures each turn (doc + patch + narration).
-- TUI shows narration and handles streaming gracefully.
+- **Natural Language Freedom**: Players can say "grab the shiny thing" or "pick up key"
+- **Consistent World State**: MCP tools ensure atomic, validated mutations
+- **Rich NPC Behavior**: NPCs react intelligently to sensory events
+- **LLM-as-Director Pattern**: Successfully avoids command parsing
+- **Sophisticated Event System**: Volume decay and multi-location sound travel
 
-Once these are green, you’ll have a solid first room you can grow entirely by playing—no hand-written reducers required.
+### Architectural Recommendations
 
+The current codebase successfully implements the vision but has organizational debt:
+
+#### Recommended File Structure (Domain-Driven)
+
+```
+game/
+├── director/         # LLM orchestration
+│   ├── mutations.go  # Mutation generation logic
+│   ├── narration.go  # Narration with context
+│   └── sensory.go    # Sensory event generation
+├── world/            # World state management  
+│   ├── state.go      # World state types
+│   ├── sync.go       # MCP synchronization
+│   └── validator.go  # Invariant validation
+├── actors/           # Player & NPCs
+│   ├── player.go     # Player actions
+│   ├── npc.go        # NPC behavior
+│   └── turns.go      # Turn management
+├── ui/              # Terminal interface
+└── infrastructure/
+    ├── llm/         # OpenAI client
+    └── mcp/         # MCP client
+```
+
+#### Key Issues to Address
+
+1. **Monolithic commands.go**: 1000+ lines handling too many responsibilities
+2. **State Sync Complexity**: Three-way sync between Python/Go/LLM representations
+3. **Missing Abstractions**: No explicit Director, Turn Manager, or Event Bus
+4. **Testing Gap**: No tests for critical mutation/validation logic
+
+### Getting Started
+
+```bash
+make run      # Start the game
+make debug    # Run with debug logging  
+make reset    # Reset world state
+make cleanlogs # Clear debug logs
+```
+
+### Architecture Philosophy
+
+This project demonstrates that sophisticated interactive fiction can emerge from simple principles:
+
+1. **LLM Understanding**: Let AI handle natural language complexity
+2. **Structured Mutations**: Enforce consistency through typed tool calls  
+3. **Event-Driven NPCs**: Create emergent behavior through sensory reactions
+4. **Authoritative State**: Maintain single source of truth for world state
+
+The result is a text adventure where players have complete natural language freedom while the world maintains consistency and NPCs exhibit intelligent behavior.

@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	
 	"textadventure/internal/game"
+	"textadventure/internal/game/sensory"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -157,7 +158,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			
 			if m.turnPhase == Narration {
 				m.turnPhase = PlayerTurn
-				m.accumulatedSensoryEvents = []SensoryEvent{}
+				m.accumulatedSensoryEvents = []sensory.SensoryEvent{}
 			}
 			return m, nil
 		}
@@ -228,7 +229,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.turnPhase == Narration {
 				m.messages = append(m.messages, "LOADING_ANIMATION")
 				
-				combinedEvents := &SensoryEventResponse{AuditoryEvents: m.accumulatedSensoryEvents}
+				combinedEvents := &sensory.SensoryEventResponse{AuditoryEvents: m.accumulatedSensoryEvents}
 				return m, startLLMStream(m.client, msg.userInput, m.world, m.gameHistory, m.logger, m.debug, msg.successes, combinedEvents, msg.actingNPCID)
 			} else {
 				m.loading = false

@@ -8,20 +8,11 @@ import (
 	"github.com/sashabaranov/go-openai"
 	
 	"textadventure/internal/game"
+	"textadventure/internal/game/sensory"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"
 )
 
-type SensoryEvent struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
-	Location    string `json:"location"`
-	Volume      string `json:"volume,omitempty"`
-}
-
-type SensoryEventResponse struct {
-	AuditoryEvents []SensoryEvent `json:"auditory_events"`
-}
 
 type TurnPhase int
 
@@ -49,7 +40,7 @@ type Model struct {
 	logger                  *logging.CompletionLogger
 	turnPhase               TurnPhase
 	npcTurnComplete         bool
-	accumulatedSensoryEvents []SensoryEvent
+	accumulatedSensoryEvents []sensory.SensoryEvent
 }
 
 func NewModel(
@@ -77,7 +68,7 @@ func NewModel(
 		logger:                  logger,
 		turnPhase:               PlayerTurn,
 		npcTurnComplete:         false,
-		accumulatedSensoryEvents: []SensoryEvent{},
+		accumulatedSensoryEvents: []sensory.SensoryEvent{},
 	}
 }
 
@@ -94,7 +85,7 @@ type animationTickMsg struct{}
 type initialLookAroundMsg struct{}
 
 type npcTurnMsg struct{
-	sensoryEvents *SensoryEventResponse
+	sensoryEvents *sensory.SensoryEventResponse
 }
 
 type narrationTurnMsg struct {
@@ -113,7 +104,7 @@ type npcActionMsg struct {
 	npcID         string
 	thoughts      string
 	action        string
-	sensoryEvents *SensoryEventResponse
+	sensoryEvents *sensory.SensoryEventResponse
 	debug         bool
 }
 
@@ -137,7 +128,7 @@ type llmStreamCompleteMsg struct {
 	startTime     time.Time
 	logger        *logging.CompletionLogger
 	debug         bool
-	sensoryEvents *SensoryEventResponse
+	sensoryEvents *sensory.SensoryEventResponse
 }
 
 type streamStartedMsg struct {
@@ -148,14 +139,14 @@ type streamStartedMsg struct {
 	systemPrompt  string
 	startTime     time.Time
 	logger        *logging.CompletionLogger
-	sensoryEvents *SensoryEventResponse
+	sensoryEvents *sensory.SensoryEventResponse
 }
 
 type mutationsGeneratedMsg struct {
 	mutations     []string
 	successes     []string
 	failures      []string
-	sensoryEvents *SensoryEventResponse
+	sensoryEvents *sensory.SensoryEventResponse
 	newWorld      game.WorldState
 	userInput     string
 	debug         bool
@@ -168,7 +159,7 @@ func initialLookAroundCmd() tea.Cmd {
 	}
 }
 
-func npcTurnCmd(sensoryEvents *SensoryEventResponse) tea.Cmd {
+func npcTurnCmd(sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
 	return func() tea.Msg {
 		return npcTurnMsg{sensoryEvents: sensoryEvents}
 	}
