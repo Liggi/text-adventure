@@ -23,4 +23,9 @@ worldstate:
 reset:
 	@./scripts/reset.sh
 
-.PHONY: run dev debug build clean worldstate reset
+cleanlogs:
+	@echo "Clearing debug logs..."
+	@rm -f debug.log
+	@echo "Debug logs cleared."
+
+.PHONY: run dev debug build clean worldstate reset cleanlogs
