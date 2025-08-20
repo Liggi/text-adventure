@@ -28,14 +28,14 @@ type MutationResponse struct {
 }
 
 type MutationsGeneratedMsg struct {
-	mutations     []string
-	successes     []string
-	failures      []string
-	sensoryEvents *sensory.SensoryEventResponse
-	newWorld      game.WorldState
-	userInput     string
-	debug         bool
-	actingNPCID   string
+	Mutations     []string
+	Successes     []string
+	Failures      []string
+	SensoryEvents *sensory.SensoryEventResponse
+	NewWorld      game.WorldState
+	UserInput     string
+	Debug         bool
+	ActingNPCID   string
 }
 
 // GenerateMutations generates world mutations based on user input using the LLM Director
@@ -441,14 +441,14 @@ func StartTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 		}
 		
 		return MutationsGeneratedMsg{
-			mutations:     allMessages,
-			successes:     successes,
-			failures:      failures,
-			sensoryEvents: sensoryEvents,
-			newWorld:      newWorld,
-			userInput:     userInput,
-			debug:         debug,
-			actingNPCID:   npcID,
+			Mutations:     allMessages,
+			Successes:     successes,
+			Failures:      failures,
+			SensoryEvents: sensoryEvents,
+			NewWorld:      newWorld,
+			UserInput:     userInput,
+			Debug:         debug,
+			ActingNPCID:   npcID,
 		}
 	}
 }

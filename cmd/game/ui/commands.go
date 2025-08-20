@@ -15,6 +15,7 @@ import (
 	
 	"textadventure/internal/game"
 	"textadventure/internal/game/actors"
+	"textadventure/internal/game/director"
 	"textadventure/internal/game/sensory"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"
@@ -494,15 +495,15 @@ func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 			allMessages = append(allMessages, failures...)
 		}
 		
-		return mutationsGeneratedMsg{
-			mutations:     allMessages,
-			successes:     successes,
-			failures:      failures,
-			sensoryEvents: sensoryEvents,
-			newWorld:      newWorld,
-			userInput:     userInput,
-			debug:         debug,
-			actingNPCID:   npcID,
+		return director.MutationsGeneratedMsg{
+			Mutations:     allMessages,
+			Successes:     successes,
+			Failures:      failures,
+			SensoryEvents: sensoryEvents,
+			NewWorld:      newWorld,
+			UserInput:     userInput,
+			Debug:         debug,
+			ActingNPCID:   npcID,
 		}
 	}
 }

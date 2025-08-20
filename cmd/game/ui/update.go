@@ -8,6 +8,7 @@ import (
 	
 	"textadventure/internal/game"
 	"textadventure/internal/game/actors"
+	"textadventure/internal/game/director"
 	"textadventure/internal/game/sensory"
 )
 
@@ -22,7 +23,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			m.turnPhase = Narration
 			
-			return m, tea.Batch(startTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
+			return m, tea.Batch(director.StartTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
 		}
 		return m, nil
 		
@@ -40,7 +41,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			
 			userInput := "narrate recent events"
-			return m, tea.Batch(startTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
+			return m, tea.Batch(director.StartTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
 		}
 		return m, nil
 		
@@ -109,7 +110,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.animationFrame = 0
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			
-			return m, tea.Batch(startTwoStepLLMFlow(m.client, msg.Action, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug, msg.NPCID), animationTimer())
+			return m, tea.Batch(director.StartTwoStepLLMFlow(m.client, msg.Action, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug, msg.NPCID), animationTimer())
 		}
 		return m, nil
 		
@@ -194,27 +195,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case mutationsGeneratedMsg:
+	case director.MutationsGeneratedMsg:
 		if m.loading {
 			m.messages = m.messages[:len(m.messages)-1]
-			m.world = msg.newWorld
+			m.world = msg.NewWorld
 			
-			if msg.debug && len(msg.mutations) > 0 {
-				for _, mutation := range msg.mutations {
+			if msg.Debug && len(msg.Mutations) > 0 {
+				for _, mutation := range msg.Mutations {
 					m.messages = append(m.messages, mutation)
 				}
 			}
 			
-			if len(msg.failures) > 0 && msg.debug {
-				for _, failure := range msg.failures {
+			if len(msg.Failures) > 0 && msg.Debug {
+				for _, failure := range msg.Failures {
 					m.messages = append(m.messages, "[ERROR] "+failure)
 				}
 			}
 			
-			if msg.debug && msg.sensoryEvents != nil {
-				if len(msg.sensoryEvents.AuditoryEvents) > 0 {
+			if msg.Debug && msg.SensoryEvents != nil {
+				if len(msg.SensoryEvents.AuditoryEvents) > 0 {
 					m.messages = append(m.messages, "[SENSORY EVENTS]")
-					for _, event := range msg.sensoryEvents.AuditoryEvents {
+					for _, event := range msg.SensoryEvents.AuditoryEvents {
 						eventMsg := fmt.Sprintf("  🔊 %s (%s) at %s", event.Description, event.Volume, event.Location)
 						m.messages = append(m.messages, eventMsg)
 					}
@@ -223,15 +224,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			
-			if msg.sensoryEvents != nil {
-				m.accumulatedSensoryEvents = append(m.accumulatedSensoryEvents, msg.sensoryEvents.AuditoryEvents...)
+			if msg.SensoryEvents != nil {
+				m.accumulatedSensoryEvents = append(m.accumulatedSensoryEvents, msg.SensoryEvents.AuditoryEvents...)
 			}
 			
 			if m.turnPhase == Narration {
 				m.messages = append(m.messages, "LOADING_ANIMATION")
 				
 				combinedEvents := &sensory.SensoryEventResponse{AuditoryEvents: m.accumulatedSensoryEvents}
-				return m, startLLMStream(m.client, msg.userInput, m.world, m.gameHistory, m.logger, m.debug, msg.successes, combinedEvents, msg.actingNPCID)
+				return m, startLLMStream(m.client, msg.UserInput, m.world, m.gameHistory, m.logger, m.debug, msg.Successes, combinedEvents, msg.ActingNPCID)
 			} else {
 				m.loading = false
 				
@@ -240,7 +241,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case PlayerTurn:
 					m.turnPhase = NPCTurns
 					m.npcTurnComplete = false
-					return m, npcTurnCmd(msg.sensoryEvents)
+					return m, npcTurnCmd(msg.SensoryEvents)
 				case NPCTurns:
 					m.turnPhase = Narration
 					m.npcTurnComplete = false
@@ -294,7 +295,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.messages = append(m.messages, "LOADING_ANIMATION")
 				m.turnPhase = PlayerTurn
 				
-				return m, tea.Batch(startTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
+				return m, tea.Batch(director.StartTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
 			}
 			return m, nil
 

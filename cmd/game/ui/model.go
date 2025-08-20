@@ -129,17 +129,6 @@ type streamStartedMsg struct {
 	sensoryEvents *sensory.SensoryEventResponse
 }
 
-type mutationsGeneratedMsg struct {
-	mutations     []string
-	successes     []string
-	failures      []string
-	sensoryEvents *sensory.SensoryEventResponse
-	newWorld      game.WorldState
-	userInput     string
-	debug         bool
-	actingNPCID   string
-}
-
 func initialLookAroundCmd() tea.Cmd {
 	return func() tea.Msg {
 		return initialLookAroundMsg{}
