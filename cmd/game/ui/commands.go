@@ -24,7 +24,7 @@ func animationTimer() tea.Cmd {
 	})
 }
 
-func startLLMStream(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, mutationResults []string) tea.Cmd {
+func startLLMStream(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, mutationResults []string, sensoryEvents *SensoryEventResponse) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
 			log.Printf("Starting LLM stream with input: %q", userInput)
@@ -37,16 +37,27 @@ func startLLMStream(client *openai.Client, userInput string, world game.WorldSta
 			mutationContext = "\n\nMUTATIONS THAT JUST OCCURRED:\n" + strings.Join(mutationResults, "\n") + "\n\nThe world state above reflects these changes. Narrate based on what actually happened."
 		}
 
-		systemPrompt := fmt.Sprintf(`You are both narrator and world simulator for a text adventure game. You have complete knowledge of the world state.
+		var sensoryContext string
+		if sensoryEvents != nil && len(sensoryEvents.AuditoryEvents) > 0 {
+			sensoryContext = "\n\nSENSORY EVENTS THAT OCCURRED:\n"
+			for _, event := range sensoryEvents.AuditoryEvents {
+				sensoryContext += fmt.Sprintf("- %s (%s volume) at %s\n", event.Description, event.Volume, event.Location)
+			}
+			sensoryContext += "\nThese are the ONLY sounds/events that occurred. Do not invent additional sounds or sensory details."
+		}
+
+		systemPrompt := fmt.Sprintf(`You are the narrator for a text adventure game. You have complete knowledge of the world state.
 
 Your job: Respond to player actions with 2-4 sentence vivid narration that feels natural and immersive.
 
 Rules:
 - Stay consistent with the provided world state
 - Base your narration on what actually happened (see mutation results)
+- If sensory events occurred, incorporate them into your narration
+- DO NOT invent new sounds, smells, or sensory events beyond what's listed
 - If action succeeded, describe the successful action vividly
 - If action failed, explain why and suggest alternatives
-- Keep responses concise but atmospheric%s`, mutationContext)
+- Keep responses concise but atmospheric%s%s`, mutationContext, sensoryContext)
 
 		req := openai.ChatCompletionRequest{
 			Model: "gpt-5-2025-08-07",
@@ -142,7 +153,20 @@ func buildWorldContext(world game.WorldState, gameHistory []string) string {
 	currentLoc := world.Locations[world.Location]
 	context := "WORLD STATE:\n"
 	context += "Current Location: " + currentLoc.Title + " (" + world.Location + ")\n"
-	context += currentLoc.Description + "\n\n"
+	context += currentLoc.Description + "\n"
+	
+	// Add NPCs present in this location
+	var npcsHere []string
+	for npcID, npc := range world.NPCs {
+		if npc.Location == world.Location {
+			npcsHere = append(npcsHere, npcID)
+		}
+	}
+	if len(npcsHere) > 0 {
+		context += "\nPeople here: " + fmt.Sprintf("%v", npcsHere) + "\n"
+	}
+	context += "\n"
+	
 	context += "Available Items Here: " + fmt.Sprintf("%v", currentLoc.Items) + "\n"
 	context += "Available Exits: " + fmt.Sprintf("%v", currentLoc.Exits) + "\n"
 	context += "Player Inventory: " + fmt.Sprintf("%v", world.Inventory) + "\n\n"
@@ -240,6 +264,104 @@ If no mutations needed, return empty mutations array.`, toolDescriptions)
 	}
 
 	return &mutationResp, nil
+}
+
+func generateSensoryEvents(client *openai.Client, userInput string, successfulMutations []string, world game.WorldState, debug bool) (*SensoryEventResponse, error) {
+
+	systemPrompt := `You are a sensory event generator for a text adventure game. Generate simple auditory events for player actions.
+
+Rules:
+- Generate only ONE event per action, at the location where it happens
+- Use simple descriptions: "footsteps", "door creaking", "loud bang"
+- Volume levels: "quiet", "moderate", "loud"
+- Quiet actions like "look around" = no events
+- Loud actions like "stomp", "shout" = one loud event
+
+Return JSON only:
+{
+  "auditory_events": [
+    {
+      "type": "auditory", 
+      "description": "loud stomping",
+      "location": "foyer",
+      "volume": "loud"
+    }
+  ]
+}
+
+If no sound, return empty auditory_events array.`
+
+	var contextMsg string
+	if len(successfulMutations) > 0 {
+		mutationContext := "Successful mutations:\n" + strings.Join(successfulMutations, "\n")
+		contextMsg = fmt.Sprintf("Player action: %s\nCurrent location: %s\n\n%s", userInput, world.Location, mutationContext)
+	} else {
+		contextMsg = fmt.Sprintf("Player action: %s\nCurrent location: %s", userInput, world.Location)
+	}
+	
+	req := openai.ChatCompletionRequest{
+		Model: "gpt-5-2025-08-07",
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemPrompt,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: contextMsg,
+			},
+		},
+		MaxCompletionTokens: 400,
+		ReasoningEffort:     "minimal",
+		ResponseFormat: &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		},
+	}
+
+	if debug {
+		log.Printf("=== SENSORY EVENT GENERATION START ===")
+		log.Printf("Action: %q", userInput)
+		log.Printf("Context message: %s", contextMsg)
+		log.Printf("System prompt length: %d chars", len(systemPrompt))
+	}
+
+	resp, err := client.CreateChatCompletion(context.Background(), req)
+	if err != nil {
+		if debug {
+			log.Printf("SENSORY EVENT API ERROR: %v", err)
+		}
+		return nil, fmt.Errorf("sensory event generation failed: %w", err)
+	}
+
+	if debug {
+		log.Printf("API Response - Choices length: %d", len(resp.Choices))
+		if len(resp.Choices) > 0 {
+			log.Printf("Response choice 0 - Finish reason: %s", resp.Choices[0].FinishReason)
+		}
+	}
+
+	var eventResp SensoryEventResponse
+	content := resp.Choices[0].Message.Content
+	
+	if debug {
+		log.Printf("Raw sensory event response length: %d", len(content))
+		log.Printf("Raw sensory event response: %q", content)
+	}
+	
+	if err := json.Unmarshal([]byte(content), &eventResp); err != nil {
+		if debug {
+			log.Printf("JSON unmarshal failed: %v", err)
+			log.Printf("Content was: %q", content)
+		}
+		return &SensoryEventResponse{AuditoryEvents: []SensoryEvent{}}, nil
+	}
+
+	if debug {
+		log.Printf("Parsed sensory events: %+v", eventResp)
+		log.Printf("=== SENSORY EVENT GENERATION END ===")
+	}
+
+	return &eventResp, nil
 }
 
 func executeMutations(ctx context.Context, mutations []MutationRequest, mcpClient *mcp.WorldStateClient, debug bool) ([]string, []string) {
@@ -396,6 +518,14 @@ func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 			}
 		}
 		
+		sensoryEvents, err := generateSensoryEvents(client, userInput, successes, newWorld, debug)
+		if err != nil {
+			if debug {
+				log.Printf("Failed to generate sensory events: %v", err)
+			}
+			sensoryEvents = &SensoryEventResponse{AuditoryEvents: []SensoryEvent{}}
+		}
+		
 		var allMessages []string
 		if debug {
 			allMessages = append(allMessages, successes...)
@@ -403,20 +533,65 @@ func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 		}
 		
 		return mutationsGeneratedMsg{
-			mutations: allMessages,
-			successes: successes,
-			failures:  failures,
-			newWorld:  newWorld,
-			userInput: userInput,
-			debug:     debug,
+			mutations:     allMessages,
+			successes:     successes,
+			failures:      failures,
+			sensoryEvents: sensoryEvents,
+			newWorld:      newWorld,
+			userInput:     userInput,
+			debug:         debug,
 		}
 	}
+}
+
+func buildNPCWorldContext(npcID string, world game.WorldState, gameHistory []string) string {
+	npc, exists := world.NPCs[npcID]
+	if !exists {
+		return buildWorldContext(world, gameHistory)
+	}
+	
+	currentLoc := world.Locations[npc.Location]
+	context := "WORLD STATE:\n"
+	context += "Current Location: " + currentLoc.Title + " (" + npc.Location + ")\n"
+	context += currentLoc.Description + "\n"
+	
+	var peopleHere []string
+	if world.Location == npc.Location {
+		peopleHere = append(peopleHere, "player")
+	}
+	for otherNPCID, otherNPC := range world.NPCs {
+		if otherNPCID != npcID && otherNPC.Location == npc.Location {
+			peopleHere = append(peopleHere, otherNPCID)
+		}
+	}
+	if len(peopleHere) > 0 {
+		context += "\nPeople here: " + fmt.Sprintf("%v", peopleHere) + "\n"
+	}
+	context += "\n"
+	
+	context += "Available Items Here: " + fmt.Sprintf("%v", currentLoc.Items) + "\n"
+	context += "Available Exits: " + fmt.Sprintf("%v", currentLoc.Exits) + "\n"
+	
+	if world.Location == npc.Location {
+		context += "Player Inventory: " + fmt.Sprintf("%v", world.Inventory) + "\n"
+	}
+	context += "\n"
+
+	if len(gameHistory) > 0 {
+		context += "RECENT CONVERSATION:\n"
+		for _, exchange := range gameHistory {
+			context += exchange + "\n"
+		}
+		context += "\n"
+	}
+
+	return context
 }
 
 func generateNPCThoughts(client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
-			worldContext := buildWorldContext(world, gameHistory)
+			worldContext := buildNPCWorldContext(npcID, world, gameHistory)
 			
 			if debug {
 				log.Printf("=== NPC BRAIN: %s ===", npcID)

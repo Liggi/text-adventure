@@ -152,9 +152,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			
+			if msg.debug && msg.sensoryEvents != nil {
+				if len(msg.sensoryEvents.AuditoryEvents) > 0 {
+					m.messages = append(m.messages, "[SENSORY EVENTS]")
+					for _, event := range msg.sensoryEvents.AuditoryEvents {
+						eventMsg := fmt.Sprintf("  🔊 %s (%s) at %s", event.Description, event.Volume, event.Location)
+						m.messages = append(m.messages, eventMsg)
+					}
+				} else {
+					m.messages = append(m.messages, "[SENSORY EVENTS] No auditory events")
+				}
+			}
+			
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			
-			return m, startLLMStream(m.client, msg.userInput, m.world, m.gameHistory, m.logger, m.debug, msg.successes)
+			return m, startLLMStream(m.client, msg.userInput, m.world, m.gameHistory, m.logger, m.debug, msg.successes, msg.sensoryEvents)
 		}
 		return m, nil
 

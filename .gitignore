@@ -1,6 +1,7 @@
+# Compiled binaries
 text-adventure
-game
 textadventure
+/game
 debug.log
 completions.db
 world_state.json
