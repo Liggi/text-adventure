@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,7 +24,7 @@ func animationTimer() tea.Cmd {
 	})
 }
 
-func startLLMStream(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool) tea.Cmd {
+func startLLMStream(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, mutationResults []string) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
 			log.Printf("Starting LLM stream with input: %q", userInput)
@@ -31,16 +32,21 @@ func startLLMStream(client *openai.Client, userInput string, world game.WorldSta
 		
 		startTime := time.Now()
 		worldContext := buildWorldContext(world, gameHistory)
-		systemPrompt := `You are both narrator and world simulator for a text adventure game. You have complete knowledge of the world state.
+		var mutationContext string
+		if len(mutationResults) > 0 {
+			mutationContext = "\n\nMUTATIONS THAT JUST OCCURRED:\n" + strings.Join(mutationResults, "\n") + "\n\nThe world state above reflects these changes. Narrate based on what actually happened."
+		}
+
+		systemPrompt := fmt.Sprintf(`You are both narrator and world simulator for a text adventure game. You have complete knowledge of the world state.
 
 Your job: Respond to player actions with 2-4 sentence vivid narration that feels natural and immersive.
 
 Rules:
 - Stay consistent with the provided world state
-- If action is impossible, explain why and suggest alternatives
-- Keep responses concise but atmospheric
-- Don't change the world state (that comes later)
-- Respond as if you can see everything in the current location`
+- Base your narration on what actually happened (see mutation results)
+- If action succeeded, describe the successful action vividly
+- If action failed, explain why and suggest alternatives
+- Keep responses concise but atmospheric%s`, mutationContext)
 
 		req := openai.ChatCompletionRequest{
 			Model: "gpt-5-2025-08-07",
@@ -162,27 +168,33 @@ type MutationResponse struct {
 	Reasoning string            `json:"reasoning"`
 }
 
-func generateMutations(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, debug bool) (*MutationResponse, error) {
+func generateMutations(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool) (*MutationResponse, error) {
 	worldContext := buildWorldContext(world, gameHistory)
 	
-	systemPrompt := `You are a world state mutation engine for a text adventure game. 
+	ctx := context.Background()
+	
+	toolDescriptions, err := mcpClient.ListTools(ctx)
+	if err != nil {
+		if debug {
+			log.Printf("Failed to get tool descriptions, using fallback: %v", err)
+		}
+		toolDescriptions = "Error: Could not retrieve tool descriptions from MCP server"
+	}
+	
+	systemPrompt := fmt.Sprintf(`You are a world state mutation engine for a text adventure game. 
 
 Your job: Analyze the player's intent and return ONLY the specific world mutations needed.
 
 Available MCP tools:
-- add_to_inventory: {"item": "item_id"} 
-- remove_from_inventory: {"item": "item_id"}
-- move_player: {"location": "location_id"}
-- transfer_item: {"item": "item_id", "from_location": "source", "to_location": "dest"}
-- unlock_door: {"location": "location_id", "direction": "north/south", "key_item": "key_id"}
+%s
 
 Return JSON only:
 {
-  "mutations": [{"tool": "add_to_inventory", "args": {"item": "silver_key"}}],
-  "reasoning": "Player wants to pick up the key"
+  "mutations": [{"tool": "tool_name", "args": {"param": "value"}}],
+  "reasoning": "Brief explanation of intent"
 }
 
-If no mutations needed, return empty mutations array.`
+If no mutations needed, return empty mutations array.`, toolDescriptions)
 
 	req := openai.ChatCompletionRequest{
 		Model: "gpt-5-2025-08-07",
@@ -301,6 +313,58 @@ func executeMutations(ctx context.Context, mutations []MutationRequest, mcpClien
 	return successes, failures
 }
 
+func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool) ([]string, []string, error) {
+	const maxRetries = 3
+	var allSuccesses []string
+	var finalFailures []string
+	
+	mutationResp, err := generateMutations(client, userInput, world, gameHistory, mcpClient, debug)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initial mutation generation failed: %w", err)
+	}
+	
+	retryCount := 0
+	pendingMutations := mutationResp.Mutations
+	
+	for retryCount <= maxRetries && len(pendingMutations) > 0 {
+		if debug && retryCount > 0 {
+			log.Printf("Retry attempt %d with %d mutations", retryCount, len(pendingMutations))
+		}
+		
+		successes, failures := executeMutations(ctx, pendingMutations, mcpClient, debug)
+		
+		allSuccesses = append(allSuccesses, successes...)
+		
+		if len(failures) == 0 {
+			break
+		}
+		
+		if retryCount >= maxRetries {
+			finalFailures = append(finalFailures, failures...)
+			if debug {
+				log.Printf("Max retries reached, giving up on %d failed mutations", len(failures))
+			}
+			break
+		}
+		
+		retryPrompt := fmt.Sprintf("RETRY: Previous mutations failed. User input: %q\n\nFailed mutations and errors:\n%s\n\nPlease generate corrected mutations or skip mutations that are impossible/malformed.", userInput, strings.Join(failures, "\n"))
+		
+		retryResp, err := generateMutations(client, retryPrompt, world, gameHistory, mcpClient, debug)
+		if err != nil {
+			if debug {
+				log.Printf("Retry mutation generation failed: %v", err)
+			}
+			finalFailures = append(finalFailures, failures...)
+			break
+		}
+		
+		pendingMutations = retryResp.Mutations
+		retryCount++
+	}
+	
+	return allSuccesses, finalFailures, nil
+}
+
 func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, mcpClient *mcp.WorldStateClient, debug bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -309,15 +373,13 @@ func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 			log.Printf("Starting two-step flow for input: %q", userInput)
 		}
 		
-		mutationResp, err := generateMutations(client, userInput, world, gameHistory, debug)
+		successes, failures, err := generateAndExecuteMutationsWithRetries(ctx, client, userInput, world, gameHistory, mcpClient, debug)
 		if err != nil {
 			if debug {
-				log.Printf("Mutation generation failed: %v", err)
+				log.Printf("Mutation retry system failed: %v", err)
 			}
 			return llmResponseMsg{response: "", err: err}
 		}
-		
-		successes, failures := executeMutations(ctx, mutationResp.Mutations, mcpClient, debug)
 		
 		newWorld := world
 		if len(successes) > 0 {
@@ -336,13 +398,13 @@ func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 		
 		var allMessages []string
 		if debug {
-			allMessages = append(allMessages, fmt.Sprintf("[DEBUG] Mutation reasoning: %s", mutationResp.Reasoning))
 			allMessages = append(allMessages, successes...)
 			allMessages = append(allMessages, failures...)
 		}
 		
 		return mutationsGeneratedMsg{
 			mutations: allMessages,
+			successes: successes,
 			failures:  failures,
 			newWorld:  newWorld,
 			userInput: userInput,

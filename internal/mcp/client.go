@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -97,7 +98,8 @@ func (w *WorldStateClient) GetWorldState(ctx context.Context) (*WorldState, erro
 	}
 
 	if result.IsError {
-		return nil, fmt.Errorf("tool call failed")
+		errorMsg := result.Content[0].(*mcp.TextContent).Text
+		return nil, fmt.Errorf(errorMsg)
 	}
 
 	var worldState WorldState
@@ -123,11 +125,10 @@ func (w *WorldStateClient) MovePlayer(ctx context.Context, location string) (str
 		return "", fmt.Errorf("failed to move player: %w", err)
 	}
 
-	if result.IsError {
-		return "", fmt.Errorf("tool call failed")
-	}
-
 	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
 	if w.debug {
 		log.Printf("Move player result: %s", response)
 	}
@@ -146,11 +147,10 @@ func (w *WorldStateClient) AddToInventory(ctx context.Context, item string) (str
 		return "", fmt.Errorf("failed to add to inventory: %w", err)
 	}
 
-	if result.IsError {
-		return "", fmt.Errorf("tool call failed")
-	}
-
 	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
 	if w.debug {
 		log.Printf("Add to inventory result: %s", response)
 	}
@@ -169,11 +169,10 @@ func (w *WorldStateClient) RemoveFromInventory(ctx context.Context, item string)
 		return "", fmt.Errorf("failed to remove from inventory: %w", err)
 	}
 
-	if result.IsError {
-		return "", fmt.Errorf("tool call failed")
-	}
-
 	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
 	if w.debug {
 		log.Printf("Remove from inventory result: %s", response)
 	}
@@ -196,11 +195,10 @@ func (w *WorldStateClient) UnlockDoor(ctx context.Context, location, direction, 
 		return "", fmt.Errorf("failed to unlock door: %w", err)
 	}
 
-	if result.IsError {
-		return "", fmt.Errorf("tool call failed")
-	}
-
 	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
 	if w.debug {
 		log.Printf("Unlock door result: %s", response)
 	}
@@ -223,14 +221,34 @@ func (w *WorldStateClient) TransferItem(ctx context.Context, item, fromLocation,
 		return "", fmt.Errorf("failed to transfer item: %w", err)
 	}
 
-	if result.IsError {
-		return "", fmt.Errorf("tool call failed")
-	}
-
 	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
 	if w.debug {
 		log.Printf("Transfer item result: %s", response)
 	}
 
 	return response, nil
+}
+
+func (w *WorldStateClient) ListTools(ctx context.Context) (string, error) {
+	params := &mcp.ListToolsParams{}
+	
+	result, err := w.session.ListTools(ctx, params)
+	if err != nil {
+		return "", fmt.Errorf("failed to list tools: %w", err)
+	}
+	
+	toolDescriptions := make([]string, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		description := fmt.Sprintf("- %s: %s", tool.Name, tool.Description)
+		if tool.InputSchema != nil {
+			schemaJson, _ := json.Marshal(tool.InputSchema)
+			description += fmt.Sprintf(" (Schema: %s)", string(schemaJson))
+		}
+		toolDescriptions = append(toolDescriptions, description)
+	}
+	
+	return strings.Join(toolDescriptions, "\n"), nil
 }

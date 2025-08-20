@@ -105,7 +105,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			
-			return m, startLLMStream(m.client, msg.userInput, m.world, m.gameHistory, m.logger, m.debug)
+			return m, startLLMStream(m.client, msg.userInput, m.world, m.gameHistory, m.logger, m.debug, msg.successes)
 		}
 		return m, nil
 

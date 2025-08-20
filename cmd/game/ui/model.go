@@ -100,6 +100,7 @@ type streamStartedMsg struct {
 
 type mutationsGeneratedMsg struct {
 	mutations []string
+	successes []string
 	failures  []string
 	newWorld  game.WorldState
 	userInput string
