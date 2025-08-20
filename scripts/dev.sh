@@ -6,4 +6,4 @@ cd services/worldstate && export PATH="$HOME/.local/bin:$PATH" && uv run python 
 echo "MCP server started"
 echo "Starting text adventure game..."
 cd ../..
-go run cmd/game/main.go cmd/game/completions.go
+go run cmd/game/main.go cmd/game/app.go
