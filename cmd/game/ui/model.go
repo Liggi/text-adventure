@@ -12,6 +12,17 @@ import (
 	"textadventure/internal/mcp"
 )
 
+type SensoryEvent struct {
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Location    string `json:"location"`
+	Volume      string `json:"volume,omitempty"`
+}
+
+type SensoryEventResponse struct {
+	AuditoryEvents []SensoryEvent `json:"auditory_events"`
+}
+
 type Model struct {
 	messages        []string
 	input           string
@@ -68,7 +79,9 @@ type animationTickMsg struct{}
 
 type initialLookAroundMsg struct{}
 
-type npcTurnMsg struct{}
+type npcTurnMsg struct{
+	sensoryEvents *SensoryEventResponse
+}
 
 type npcThoughtsMsg struct {
 	npcID    string
@@ -89,32 +102,35 @@ type llmStreamChunkMsg struct {
 }
 
 type llmStreamCompleteMsg struct {
-	world        game.WorldState
-	userInput    string
-	systemPrompt string
-	response     string
-	startTime    time.Time
-	logger       *logging.CompletionLogger
-	debug        bool
+	world         game.WorldState
+	userInput     string
+	systemPrompt  string
+	response      string
+	startTime     time.Time
+	logger        *logging.CompletionLogger
+	debug         bool
+	sensoryEvents *SensoryEventResponse
 }
 
 type streamStartedMsg struct {
-	stream       *openai.ChatCompletionStream
-	debug        bool
-	world        game.WorldState
-	userInput    string
-	systemPrompt string
-	startTime    time.Time
-	logger       *logging.CompletionLogger
+	stream        *openai.ChatCompletionStream
+	debug         bool
+	world         game.WorldState
+	userInput     string
+	systemPrompt  string
+	startTime     time.Time
+	logger        *logging.CompletionLogger
+	sensoryEvents *SensoryEventResponse
 }
 
 type mutationsGeneratedMsg struct {
-	mutations []string
-	successes []string
-	failures  []string
-	newWorld  game.WorldState
-	userInput string
-	debug     bool
+	mutations     []string
+	successes     []string
+	failures      []string
+	sensoryEvents *SensoryEventResponse
+	newWorld      game.WorldState
+	userInput     string
+	debug         bool
 }
 
 func initialLookAroundCmd() tea.Cmd {
@@ -123,8 +139,8 @@ func initialLookAroundCmd() tea.Cmd {
 	}
 }
 
-func npcTurnCmd() tea.Cmd {
+func npcTurnCmd(sensoryEvents *SensoryEventResponse) tea.Cmd {
 	return func() tea.Msg {
-		return npcTurnMsg{}
+		return npcTurnMsg{sensoryEvents: sensoryEvents}
 	}
 }

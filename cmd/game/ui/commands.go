@@ -85,13 +85,14 @@ Rules:
 		}
 		
 		return streamStartedMsg{
-			stream:       stream,
-			debug:        debug,
-			world:        world,
-			userInput:    userInput,
-			systemPrompt: systemPrompt,
-			startTime:    startTime,
-			logger:       logger,
+			stream:        stream,
+			debug:         debug,
+			world:         world,
+			userInput:     userInput,
+			systemPrompt:  systemPrompt,
+			startTime:     startTime,
+			logger:        logger,
+			sensoryEvents: sensoryEvents,
 		}
 	}
 }
@@ -119,13 +120,14 @@ func readNextChunk(stream *openai.ChatCompletionStream, debug bool, completionCt
 			}
 			
 			return llmStreamCompleteMsg{
-				world:        completionCtx.world,
-				userInput:    completionCtx.userInput,
-				systemPrompt: completionCtx.systemPrompt,
-				response:     fullResponse,
-				startTime:    completionCtx.startTime,
-				logger:       completionCtx.logger,
-				debug:        debug,
+				world:         completionCtx.world,
+				userInput:     completionCtx.userInput,
+				systemPrompt:  completionCtx.systemPrompt,
+				response:      fullResponse,
+				startTime:     completionCtx.startTime,
+				logger:        completionCtx.logger,
+				debug:         debug,
+				sensoryEvents: completionCtx.sensoryEvents,
 			}
 		}
 		
@@ -588,10 +590,82 @@ func buildNPCWorldContext(npcID string, world game.WorldState, gameHistory []str
 	return context
 }
 
-func generateNPCThoughts(client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool) tea.Cmd {
+func buildNPCWorldContextWithSenses(npcID string, world game.WorldState, sensoryEvents *SensoryEventResponse) string {
+	npc, exists := world.NPCs[npcID]
+	if !exists {
+		return "ERROR: NPC not found"
+	}
+	
+	currentLoc := world.Locations[npc.Location]
+	context := "WORLD STATE:\n"
+	context += "Current Location: " + currentLoc.Title + " (" + npc.Location + ")\n"
+	context += currentLoc.Description + "\n"
+	
+	var peopleHere []string
+	if world.Location == npc.Location {
+		peopleHere = append(peopleHere, "player")
+	}
+	for otherNPCID, otherNPC := range world.NPCs {
+		if otherNPCID != npcID && otherNPC.Location == npc.Location {
+			peopleHere = append(peopleHere, otherNPCID)
+		}
+	}
+	if len(peopleHere) > 0 {
+		context += "\nPeople here: " + fmt.Sprintf("%v", peopleHere) + "\n"
+	}
+	context += "\n"
+	
+	context += "Available Items Here: " + fmt.Sprintf("%v", currentLoc.Items) + "\n"
+	context += "Available Exits: " + fmt.Sprintf("%v", currentLoc.Exits) + "\n"
+	
+	if world.Location == npc.Location {
+		context += "Player Inventory: " + fmt.Sprintf("%v", world.Inventory) + "\n"
+	}
+	context += "\n"
+
+	// Add sensory events that Elena can perceive
+	if sensoryEvents != nil && len(sensoryEvents.AuditoryEvents) > 0 {
+		context += "RECENT SOUNDS:\n"
+		for _, event := range sensoryEvents.AuditoryEvents {
+			// Simple distance model: Elena can hear loud sounds from adjacent rooms, all sounds from same room
+			if event.Location == npc.Location {
+				context += fmt.Sprintf("- %s (heard clearly)\n", event.Description)
+			} else if event.Volume == "loud" {
+				// Check if locations are adjacent (either direction)
+				isAdjacent := false
+				npcLoc := world.Locations[npc.Location]
+				for _, destination := range npcLoc.Exits {
+					if destination == event.Location {
+						isAdjacent = true
+						break
+					}
+				}
+				if !isAdjacent {
+					eventLoc, eventExists := world.Locations[event.Location]
+					if eventExists {
+						for _, destination := range eventLoc.Exits {
+							if destination == npc.Location {
+								isAdjacent = true
+								break
+							}
+						}
+					}
+				}
+				if isAdjacent {
+					context += fmt.Sprintf("- %s (heard faintly from %s)\n", event.Description, event.Location)
+				}
+			}
+		}
+		context += "\n"
+	}
+
+	return context
+}
+
+func generateNPCThoughts(client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *SensoryEventResponse) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
-			worldContext := buildNPCWorldContext(npcID, world, gameHistory)
+			worldContext := buildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 			
 			if debug {
 				log.Printf("=== NPC BRAIN: %s ===", npcID)
@@ -600,19 +674,25 @@ func generateNPCThoughts(client *openai.Client, npcID string, world game.WorldSt
 				log.Printf("=== END NPC CONTEXT ===")
 			}
 			
-			systemPrompt := fmt.Sprintf(`You are %s, an NPC observing a player. Generate realistic internal thoughts - short, fragmented, like real human thinking.
+			systemPrompt := fmt.Sprintf(`You are %s, an NPC in the game world. Generate realistic internal thoughts based on your current situation.
+
+CONTEXT EXPLANATION:
+- WORLD STATE: Describes your current room and environment
+- Available Items Here: Items you can see in your room (you don't have them, they're just present)
+- People here: Other people in your room with you
+- RECENT SOUNDS: Actual sounds you heard (if any). If no sounds listed, everything is quiet
+- Only react to information actually provided - don't invent events that didn't happen
 
 Your thoughts should be:
-- Brief and natural (10-20 words total)  
-- Single line, not multiple sentences
-- Immediate reactions, not flowery observations
-- Simple language, not poetic
-- Like actual inner monologue
+- Brief and natural (10-20 words total)
+- Single line, not multiple sentences  
+- Based only on what you can actually observe or hear
+- Simple language, like actual inner monologue
 
 Examples:
-"Hmm, they're looking around carefully."
-"Wonder what they want with that key."
-"Someone's being cautious. Good."
+"Quiet in here, wonder what they're doing."
+"Heard footsteps from the foyer."
+"Still got that journal sitting here."
 
 Return only your thoughts, nothing else. Keep it to one line.`, npcID)
 

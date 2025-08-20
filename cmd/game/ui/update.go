@@ -26,7 +26,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 	case npcTurnMsg:
 		if !m.loading {
-			return m, generateNPCThoughts(m.client, "elena", m.world, m.gameHistory, m.debug)
+			return m, generateNPCThoughts(m.client, "elena", m.world, m.gameHistory, m.debug, msg.sensoryEvents)
 		}
 		return m, nil
 		
@@ -102,7 +102,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, "")
 			
 			// Trigger NPC turn after player turn completes
-			return m, npcTurnCmd()
+			return m, npcTurnCmd(msg.sensoryEvents)
 		}
 		return m, nil
 
