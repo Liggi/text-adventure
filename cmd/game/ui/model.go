@@ -70,6 +70,12 @@ type initialLookAroundMsg struct{}
 
 type npcTurnMsg struct{}
 
+type npcThoughtsMsg struct {
+	npcID    string
+	thoughts string
+	debug    bool
+}
+
 type llmResponseMsg struct {
 	response string
 	err      error

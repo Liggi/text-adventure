@@ -26,10 +26,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		
 	case npcTurnMsg:
 		if !m.loading {
-			if m.debug {
-				m.messages = append(m.messages, "[DEBUG] Elena takes her turn... [does nothing]")
-				m.messages = append(m.messages, "")
+			return m, generateNPCThoughts(m.client, "elena", m.world, m.gameHistory, m.debug)
+		}
+		return m, nil
+		
+	case npcThoughtsMsg:
+		if msg.debug && msg.thoughts != "" {
+			// Use the NPC's defined debug color
+			var colorCode string
+			if npc, exists := m.world.NPCs[msg.npcID]; exists && npc.DebugColor != "" {
+				colorCode = fmt.Sprintf("\033[%sm", npc.DebugColor)
+			} else {
+				colorCode = "\033[36m" // Default cyan
 			}
+			
+			// Handle multi-line thoughts by applying color to each line
+			lines := strings.Split(msg.thoughts, "\n")
+			for i, line := range lines {
+				if strings.TrimSpace(line) != "" {
+					if i == 0 {
+						coloredThoughts := fmt.Sprintf("%s[%s] %s\033[0m", colorCode, strings.ToUpper(msg.npcID), line)
+						m.messages = append(m.messages, coloredThoughts)
+					} else {
+						coloredThoughts := fmt.Sprintf("%s      %s\033[0m", colorCode, line)
+						m.messages = append(m.messages, coloredThoughts)
+					}
+				}
+			}
+			m.messages = append(m.messages, "")
 		}
 		return m, nil
 		

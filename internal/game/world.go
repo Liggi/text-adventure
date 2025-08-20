@@ -4,6 +4,7 @@ type WorldState struct {
 	Location  string
 	Inventory []string
 	Locations map[string]LocationInfo
+	NPCs      map[string]NPCInfo
 }
 
 type LocationInfo struct {
@@ -11,6 +12,11 @@ type LocationInfo struct {
 	Description string
 	Items       []string
 	Exits       map[string]string
+}
+
+type NPCInfo struct {
+	Location   string
+	DebugColor string
 }
 
 func NewDefaultWorldState() WorldState {

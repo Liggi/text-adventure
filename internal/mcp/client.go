@@ -21,6 +21,7 @@ type WorldState struct {
 	Player    Player               `json:"player"`
 	Locations map[string]Location  `json:"locations"`
 	Items     map[string]Item      `json:"items"`
+	NPCs      map[string]NPC       `json:"npcs"`
 }
 
 type Player struct {
@@ -45,6 +46,11 @@ type Item struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
 	CanUnlock   []string `json:"can_unlock"`
+}
+
+type NPC struct {
+	Location   string `json:"location"`
+	DebugColor string `json:"debug_color"`
 }
 
 func NewWorldStateClient(debug bool) (*WorldStateClient, error) {

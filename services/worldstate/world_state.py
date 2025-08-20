@@ -114,7 +114,8 @@ DEFAULT_WORLD_STATE = {
     },
     "npcs": {
         "elena": {
-            "location": "library"
+            "location": "library",
+            "debug_color": "35"
         }
     }
 }

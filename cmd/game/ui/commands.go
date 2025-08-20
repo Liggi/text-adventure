@@ -412,3 +412,79 @@ func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 		}
 	}
 }
+
+func generateNPCThoughts(client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool) tea.Cmd {
+	return func() tea.Msg {
+		if debug {
+			worldContext := buildWorldContext(world, gameHistory)
+			
+			if debug {
+				log.Printf("=== NPC BRAIN: %s ===", npcID)
+				log.Printf("World context sent to %s:", npcID)
+				log.Printf("%s", worldContext)
+				log.Printf("=== END NPC CONTEXT ===")
+			}
+			
+			systemPrompt := fmt.Sprintf(`You are %s, an NPC observing a player. Generate realistic internal thoughts - short, fragmented, like real human thinking.
+
+Your thoughts should be:
+- Brief and natural (10-20 words total)  
+- Single line, not multiple sentences
+- Immediate reactions, not flowery observations
+- Simple language, not poetic
+- Like actual inner monologue
+
+Examples:
+"Hmm, they're looking around carefully."
+"Wonder what they want with that key."
+"Someone's being cautious. Good."
+
+Return only your thoughts, nothing else. Keep it to one line.`, npcID)
+
+			req := openai.ChatCompletionRequest{
+				Model: "gpt-5-2025-08-07",
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role:    openai.ChatMessageRoleSystem,
+						Content: systemPrompt,
+					},
+					{
+						Role:    openai.ChatMessageRoleUser,
+						Content: worldContext + "\n\nGenerate your internal thoughts about recent events.",
+					},
+				},
+				MaxCompletionTokens: 100,
+				ReasoningEffort:     "minimal",
+			}
+
+			resp, err := client.CreateChatCompletion(context.Background(), req)
+			if err != nil {
+				if debug {
+					log.Printf("NPC brain error for %s: %v", npcID, err)
+				}
+				return npcThoughtsMsg{
+					npcID:    npcID,
+					thoughts: fmt.Sprintf("*%s seems distracted*", npcID),
+					debug:    debug,
+				}
+			}
+
+			thoughts := resp.Choices[0].Message.Content
+			if debug {
+				log.Printf("NPC %s generated thoughts: %s", npcID, thoughts)
+			}
+			
+			return npcThoughtsMsg{
+				npcID:    npcID,
+				thoughts: thoughts,
+				debug:    debug,
+			}
+		}
+		
+		return npcThoughtsMsg{
+			npcID:    npcID,
+			thoughts: "",
+			debug:    debug,
+		}
+	}
+}
