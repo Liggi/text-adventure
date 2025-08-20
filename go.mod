@@ -1,4 +1,4 @@
-module text-adventure
+module textadventure
 
 go 1.24.3
 
