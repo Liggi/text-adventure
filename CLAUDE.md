@@ -54,3 +54,10 @@ Example LLM response format:
 - MCP tools provide the mutation primitives
 - World state is always authoritative source of truth
 - Debug logging shows both narration and executed mutations
+
+## Commit Message Style
+
+- Use one-liner format: `[tag] brief description`
+- All lowercase except for the tag  
+- Use descriptive tags that match the work context
+- Keep messages concise and focused

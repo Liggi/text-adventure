@@ -14,18 +14,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case initialLookAroundMsg:
 		if !m.loading && m.mcpClient != nil {
 			userInput := "look around"
-			// Don't add the user input to messages - keep it invisible
 			m.gameHistory = append(m.gameHistory, "Player: "+userInput)
 			m.loading = true
 			m.animationFrame = 0
 			m.messages = append(m.messages, "LOADING_ANIMATION")
+			m.turnPhase = Narration
 			
 			return m, tea.Batch(startTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
 		}
 		return m, nil
 		
 	case npcTurnMsg:
-		if !m.loading {
+		if !m.loading && m.turnPhase == NPCTurns && !m.npcTurnComplete {
+			m.npcTurnComplete = true
 			return m, generateNPCTurn(m.client, "elena", m.world, m.gameHistory, m.debug, msg.sensoryEvents)
 		}
 		return m, nil
@@ -143,8 +144,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			
 			m.messages = append(m.messages, "")
 			
-			// Trigger NPC turn after player turn completes
-			return m, npcTurnCmd(msg.sensoryEvents)
+			switch m.turnPhase {
+			case PlayerTurn:
+				m.turnPhase = NPCTurns
+				m.npcTurnComplete = false
+				return m, npcTurnCmd(msg.sensoryEvents)
+			case NPCTurns:
+				m.turnPhase = PlayerTurn
+				m.npcTurnComplete = false
+				return m, nil
+			case Narration:
+				m.turnPhase = PlayerTurn
+				return m, nil
+			default:
+				return m, nil
+			}
 		}
 		return m, nil
 
@@ -246,13 +260,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				
-				// Normal game input
 				m.messages = append(m.messages, "> "+userInput)
 				m.messages = append(m.messages, "")
 				m.gameHistory = append(m.gameHistory, "Player: "+userInput)
 				m.loading = true
 				m.animationFrame = 0
 				m.messages = append(m.messages, "LOADING_ANIMATION")
+				m.turnPhase = PlayerTurn
 				
 				return m, tea.Batch(startTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
 			}

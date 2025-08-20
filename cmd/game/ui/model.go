@@ -23,6 +23,14 @@ type SensoryEventResponse struct {
 	AuditoryEvents []SensoryEvent `json:"auditory_events"`
 }
 
+type TurnPhase int
+
+const (
+	PlayerTurn TurnPhase = iota
+	NPCTurns
+	Narration
+)
+
 type Model struct {
 	messages        []string
 	input           string
@@ -39,6 +47,8 @@ type Model struct {
 	world           game.WorldState
 	gameHistory     []string
 	logger          *logging.CompletionLogger
+	turnPhase       TurnPhase
+	npcTurnComplete bool
 }
 
 func NewModel(
@@ -56,14 +66,16 @@ func NewModel(
 	}
 	
 	return Model{
-		messages:    messages,
-		input:       "",
-		cursor:      0,
-		client:      client,
-		debug:       debug,
-		world:       world,
-		gameHistory: []string{},
-		logger:      logger,
+		messages:        messages,
+		input:           "",
+		cursor:          0,
+		client:          client,
+		debug:           debug,
+		world:           world,
+		gameHistory:     []string{},
+		logger:          logger,
+		turnPhase:       PlayerTurn,
+		npcTurnComplete: false,
 	}
 }
 
