@@ -220,7 +220,29 @@ func generateMutations(client *openai.Client, userInput string, world game.World
 		toolDescriptions = "Error: Could not retrieve tool descriptions from MCP server"
 	}
 	
-	systemPrompt := fmt.Sprintf(`You are a world state mutation engine for a text adventure game. 
+	var systemPrompt string
+	var actionLabel string
+	
+	if actingNPCID != "" {
+		systemPrompt = fmt.Sprintf(`You are a world state mutation engine for a text adventure game. 
+
+Your job: Analyze the NPC's action and return ONLY the specific world mutations needed.
+
+The NPC %s is acting from their current location. Treat this as a valid NPC action, not a player command.
+
+Available MCP tools:
+%s
+
+Return JSON only:
+{
+  "mutations": [{"tool": "tool_name", "args": {"param": "value"}}],
+  "reasoning": "Brief explanation of NPC action"
+}
+
+If no mutations needed, return empty mutations array.`, actingNPCID, toolDescriptions)
+		actionLabel = fmt.Sprintf("NPC %s ACTION", strings.ToUpper(actingNPCID))
+	} else {
+		systemPrompt = fmt.Sprintf(`You are a world state mutation engine for a text adventure game. 
 
 Your job: Analyze the player's intent and return ONLY the specific world mutations needed.
 
@@ -234,6 +256,8 @@ Return JSON only:
 }
 
 If no mutations needed, return empty mutations array.`, toolDescriptions)
+		actionLabel = "PLAYER ACTION"
+	}
 
 	req := openai.ChatCompletionRequest{
 		Model: "gpt-5-2025-08-07",
@@ -244,7 +268,7 @@ If no mutations needed, return empty mutations array.`, toolDescriptions)
 			},
 			{
 				Role:    openai.ChatMessageRoleUser,
-				Content: worldContext + "PLAYER ACTION: " + userInput,
+				Content: worldContext + actionLabel + ": " + userInput,
 			},
 		},
 		MaxCompletionTokens: 200,
@@ -831,7 +855,9 @@ func generateNPCAction(client *openai.Client, npcID string, npcThoughts string, 
 
 	worldContext := buildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 	
-	systemPrompt := `Based on your current thoughts and situation, decide what single action you want to take, or do nothing.
+	systemPrompt := `Based on your current thoughts and situation, decide what ONE action you want to take, or do nothing.
+
+CRITICAL: You can only do ONE thing per turn. Choose the most important action based on your thoughts.
 
 Express your action as a simple, clear statement of intent. Your action should follow logically from your current thoughts.
 
