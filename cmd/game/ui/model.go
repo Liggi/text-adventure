@@ -94,19 +94,6 @@ type narrationTurnMsg struct {
 	debug       bool
 }
 
-type npcThoughtsMsg struct {
-	npcID    string
-	thoughts string
-	debug    bool
-}
-
-type npcActionMsg struct {
-	npcID         string
-	thoughts      string
-	action        string
-	sensoryEvents *sensory.SensoryEventResponse
-	debug         bool
-}
 
 type llmResponseMsg struct {
 	response string

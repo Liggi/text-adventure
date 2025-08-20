@@ -14,6 +14,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 	
 	"textadventure/internal/game"
+	"textadventure/internal/game/actors"
 	"textadventure/internal/game/sensory"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"
@@ -610,7 +611,7 @@ func buildNPCWorldContextWithSenses(npcID string, world game.WorldState, sensory
 func generateNPCThoughts(client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
-			worldContext := buildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
+			worldContext := actors.BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 			
 			if debug {
 				log.Printf("=== NPC BRAIN: %s ===", npcID)
@@ -662,10 +663,10 @@ Return only your thoughts, nothing else. Keep it to one line.`, npcID)
 				if debug {
 					log.Printf("NPC brain error for %s: %v", npcID, err)
 				}
-				return npcThoughtsMsg{
-					npcID:    npcID,
-					thoughts: fmt.Sprintf("*%s seems distracted*", npcID),
-					debug:    debug,
+				return actors.NPCThoughtsMsg{
+					NPCID:    npcID,
+					Thoughts: fmt.Sprintf("*%s seems distracted*", npcID),
+					Debug:    debug,
 				}
 			}
 
@@ -674,17 +675,17 @@ Return only your thoughts, nothing else. Keep it to one line.`, npcID)
 				log.Printf("NPC %s generated thoughts: %s", npcID, thoughts)
 			}
 			
-			return npcThoughtsMsg{
-				npcID:    npcID,
-				thoughts: thoughts,
-				debug:    debug,
+			return actors.NPCThoughtsMsg{
+				NPCID:    npcID,
+				Thoughts: thoughts,
+				Debug:    debug,
 			}
 		}
 		
-		return npcThoughtsMsg{
-			npcID:    npcID,
-			thoughts: "",
-			debug:    debug,
+		return actors.NPCThoughtsMsg{
+			NPCID:    npcID,
+			Thoughts: "",
+			Debug:    debug,
 		}
 	}
 }
@@ -694,7 +695,7 @@ func generateNPCAction(client *openai.Client, npcID string, npcThoughts string, 
 		return "", nil
 	}
 
-	worldContext := buildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
+	worldContext := actors.BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 	
 	systemPrompt := `Based on your current thoughts and situation, decide what ONE action you want to take, or do nothing.
 
@@ -740,7 +741,7 @@ func generateNPCTurn(client *openai.Client, npcID string, world game.WorldState,
 	return func() tea.Msg {
 		thoughts := ""
 		if debug {
-			worldContext := buildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
+			worldContext := actors.BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 			
 			if debug {
 				log.Printf("=== NPC BRAIN: %s ===", npcID)
@@ -796,18 +797,18 @@ Return only your thoughts, nothing else. Keep it to one line.`, npcID)
 			}
 		}
 		
-		action, err := generateNPCAction(client, npcID, thoughts, world, sensoryEvents, debug)
+		action, err := actors.GenerateNPCAction(client, npcID, thoughts, world, sensoryEvents, debug)
 		if err != nil && debug {
 			log.Printf("NPC action generation error for %s: %v", npcID, err)
 			action = ""
 		}
 		
-		return npcActionMsg{
-			npcID:         npcID,
-			thoughts:      thoughts,
-			action:        action,
-			sensoryEvents: sensoryEvents,
-			debug:         debug,
+		return actors.NPCActionMsg{
+			NPCID:         npcID,
+			Thoughts:      thoughts,
+			Action:        action,
+			SensoryEvents: sensoryEvents,
+			Debug:         debug,
 		}
 	}
 }

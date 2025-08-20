@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	
 	"textadventure/internal/game"
+	"textadventure/internal/game/actors"
 	"textadventure/internal/game/sensory"
 )
 
@@ -28,7 +29,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case npcTurnMsg:
 		if !m.loading && m.turnPhase == NPCTurns && !m.npcTurnComplete {
 			m.npcTurnComplete = true
-			return m, generateNPCTurn(m.client, "elena", m.world, m.gameHistory, m.debug, msg.sensoryEvents)
+			return m, actors.GenerateNPCTurn(m.client, "elena", m.world, m.gameHistory, m.debug, msg.sensoryEvents)
 		}
 		return m, nil
 		
@@ -43,22 +44,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 		
-	case npcThoughtsMsg:
-		if msg.debug && msg.thoughts != "" {
+	case actors.NPCThoughtsMsg:
+		if msg.Debug && msg.Thoughts != "" {
 			// Use the NPC's defined debug color
 			var colorCode string
-			if npc, exists := m.world.NPCs[msg.npcID]; exists && npc.DebugColor != "" {
+			if npc, exists := m.world.NPCs[msg.NPCID]; exists && npc.DebugColor != "" {
 				colorCode = fmt.Sprintf("\033[%sm", npc.DebugColor)
 			} else {
 				colorCode = "\033[36m" // Default cyan
 			}
 			
 			// Handle multi-line thoughts by applying color to each line
-			lines := strings.Split(msg.thoughts, "\n")
+			lines := strings.Split(msg.Thoughts, "\n")
 			for i, line := range lines {
 				if strings.TrimSpace(line) != "" {
 					if i == 0 {
-						coloredThoughts := fmt.Sprintf("%s[%s] %s\033[0m", colorCode, strings.ToUpper(msg.npcID), line)
+						coloredThoughts := fmt.Sprintf("%s[%s] %s\033[0m", colorCode, strings.ToUpper(msg.NPCID), line)
 						m.messages = append(m.messages, coloredThoughts)
 					} else {
 						coloredThoughts := fmt.Sprintf("%s      %s\033[0m", colorCode, line)
@@ -70,21 +71,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 		
-	case npcActionMsg:
-		if msg.debug && msg.thoughts != "" {
+	case actors.NPCActionMsg:
+		if msg.Debug && msg.Thoughts != "" {
 			// Display NPC thoughts using the same logic as npcThoughtsMsg
 			var colorCode string
-			if npc, exists := m.world.NPCs[msg.npcID]; exists && npc.DebugColor != "" {
+			if npc, exists := m.world.NPCs[msg.NPCID]; exists && npc.DebugColor != "" {
 				colorCode = fmt.Sprintf("\033[%sm", npc.DebugColor)
 			} else {
 				colorCode = "\033[36m" // Default cyan
 			}
 			
-			lines := strings.Split(msg.thoughts, "\n")
+			lines := strings.Split(msg.Thoughts, "\n")
 			for i, line := range lines {
 				if strings.TrimSpace(line) != "" {
 					if i == 0 {
-						coloredThoughts := fmt.Sprintf("%s[%s] %s\033[0m", colorCode, strings.ToUpper(msg.npcID), line)
+						coloredThoughts := fmt.Sprintf("%s[%s] %s\033[0m", colorCode, strings.ToUpper(msg.NPCID), line)
 						m.messages = append(m.messages, coloredThoughts)
 					} else {
 						coloredThoughts := fmt.Sprintf("%s      %s\033[0m", colorCode, line)
@@ -96,19 +97,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		
 		// If NPC has an action, execute it through the mutation pipeline
-		if msg.action != "" && !m.loading {
-			if msg.debug {
-				actionMsg := fmt.Sprintf("\033[33m[%s ACTION] %s\033[0m", strings.ToUpper(msg.npcID), msg.action)
+		if msg.Action != "" && !m.loading {
+			if msg.Debug {
+				actionMsg := fmt.Sprintf("\033[33m[%s ACTION] %s\033[0m", strings.ToUpper(msg.NPCID), msg.Action)
 				m.messages = append(m.messages, actionMsg)
 				m.messages = append(m.messages, "")
 			}
 			
-			m.gameHistory = append(m.gameHistory, fmt.Sprintf("%s: %s", msg.npcID, msg.action))
+			m.gameHistory = append(m.gameHistory, fmt.Sprintf("%s: %s", msg.NPCID, msg.Action))
 			m.loading = true
 			m.animationFrame = 0
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			
-			return m, tea.Batch(startTwoStepLLMFlow(m.client, msg.action, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug, msg.npcID), animationTimer())
+			return m, tea.Batch(startTwoStepLLMFlow(m.client, msg.Action, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug, msg.NPCID), animationTimer())
 		}
 		return m, nil
 		
