@@ -590,6 +590,76 @@ func buildNPCWorldContext(npcID string, world game.WorldState, gameHistory []str
 	return context
 }
 
+func calculateRoomDistance(fromLocation, toLocation string, locations map[string]game.LocationInfo) int {
+	if fromLocation == toLocation {
+		return 0
+	}
+	
+	// BFS to find shortest path
+	visited := make(map[string]bool)
+	queue := []struct {
+		location string
+		distance int
+	}{{fromLocation, 0}}
+	
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		
+		if visited[current.location] {
+			continue
+		}
+		visited[current.location] = true
+		
+		if current.location == toLocation {
+			return current.distance
+		}
+		
+		// Add all connected rooms to queue
+		if loc, exists := locations[current.location]; exists {
+			for _, destination := range loc.Exits {
+				if !visited[destination] {
+					queue = append(queue, struct {
+						location string
+						distance int
+					}{destination, current.distance + 1})
+				}
+			}
+		}
+	}
+	
+	return -1 // No path found
+}
+
+func applyVolumeDecay(originalVolume string, distance int) string {
+	if distance < 0 {
+		return "" // No path, can't hear
+	}
+	
+	switch originalVolume {
+	case "loud":
+		switch distance {
+		case 0: return "loudly"
+		case 1: return "moderately"  
+		case 2: return "faintly"
+		default: return "" // Too far
+		}
+	case "moderate":
+		switch distance {
+		case 0: return "moderately"
+		case 1: return "faintly"
+		default: return "" // Too far
+		}
+	case "quiet":
+		switch distance {
+		case 0: return "quietly"
+		default: return "" // Too far
+		}
+	default:
+		return ""
+	}
+}
+
 func buildNPCWorldContextWithSenses(npcID string, world game.WorldState, sensoryEvents *SensoryEventResponse) string {
 	npc, exists := world.NPCs[npcID]
 	if !exists {
@@ -627,32 +697,14 @@ func buildNPCWorldContextWithSenses(npcID string, world game.WorldState, sensory
 	if sensoryEvents != nil && len(sensoryEvents.AuditoryEvents) > 0 {
 		context += "RECENT SOUNDS:\n"
 		for _, event := range sensoryEvents.AuditoryEvents {
-			// Simple distance model: Elena can hear loud sounds from adjacent rooms, all sounds from same room
-			if event.Location == npc.Location {
-				context += fmt.Sprintf("- %s (heard clearly)\n", event.Description)
-			} else if event.Volume == "loud" {
-				// Check if locations are adjacent (either direction)
-				isAdjacent := false
-				npcLoc := world.Locations[npc.Location]
-				for _, destination := range npcLoc.Exits {
-					if destination == event.Location {
-						isAdjacent = true
-						break
-					}
-				}
-				if !isAdjacent {
-					eventLoc, eventExists := world.Locations[event.Location]
-					if eventExists {
-						for _, destination := range eventLoc.Exits {
-							if destination == npc.Location {
-								isAdjacent = true
-								break
-							}
-						}
-					}
-				}
-				if isAdjacent {
-					context += fmt.Sprintf("- %s (heard faintly from %s)\n", event.Description, event.Location)
+			distance := calculateRoomDistance(npc.Location, event.Location, world.Locations)
+			decayedVolume := applyVolumeDecay(event.Volume, distance)
+			
+			if decayedVolume != "" {
+				if distance == 0 {
+					context += fmt.Sprintf("- %s (heard clearly)\n", event.Description)
+				} else {
+					context += fmt.Sprintf("- %s (heard %s from %s)\n", event.Description, decayedVolume, event.Location)
 				}
 			}
 		}
