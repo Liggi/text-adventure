@@ -8,6 +8,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 	
 	"textadventure/internal/game"
+	"textadventure/internal/game/director"
 	"textadventure/internal/game/sensory"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"

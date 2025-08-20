@@ -8,6 +8,7 @@ import (
 	
 	"textadventure/internal/game"
 	"textadventure/internal/game/actors"
+	"textadventure/internal/game/director"
 	"textadventure/internal/game/sensory"
 )
 

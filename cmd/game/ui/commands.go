@@ -15,6 +15,7 @@ import (
 	
 	"textadventure/internal/game"
 	"textadventure/internal/game/actors"
+	"textadventure/internal/game/director"
 	"textadventure/internal/game/sensory"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"
@@ -206,7 +207,6 @@ type MutationRequest struct {
 
 type MutationResponse struct {
 	Mutations []MutationRequest `json:"mutations"`
-	Reasoning string            `json:"reasoning"`
 }
 
 func generateMutations(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool, actingNPCID string) (*MutationResponse, error) {
