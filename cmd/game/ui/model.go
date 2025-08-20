@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 	
 	tea "github.com/charmbracelet/bubbletea"
@@ -8,6 +9,7 @@ import (
 	
 	"textadventure/internal/game"
 	"textadventure/internal/logging"
+	"textadventure/internal/mcp"
 )
 
 type Model struct {
@@ -17,6 +19,7 @@ type Model struct {
 	width           int
 	height          int
 	client          *openai.Client
+	mcpClient       *mcp.WorldStateClient
 	debug           bool
 	loading         bool
 	streaming       bool
@@ -33,8 +36,16 @@ func NewModel(
 	logger *logging.CompletionLogger,
 	debug bool,
 ) Model {
+	messages := []string{}
+	if debug {
+		messages = append(messages, "[DEBUG] MCP integration active - world state loaded from server")
+		messages = append(messages, fmt.Sprintf("[DEBUG] Player location: %s, Inventory: %v", world.Location, world.Inventory))
+		messages = append(messages, "[DEBUG] Debug commands: /worldstate, /help")
+		messages = append(messages, "")
+	}
+	
 	return Model{
-		messages:    []string{},
+		messages:    messages,
 		input:       "",
 		cursor:      0,
 		client:      client,
@@ -43,6 +54,10 @@ func NewModel(
 		gameHistory: []string{},
 		logger:      logger,
 	}
+}
+
+func (m *Model) SetMCPClient(client *mcp.WorldStateClient) {
+	m.mcpClient = client
 }
 
 func (m Model) Init() tea.Cmd {
@@ -81,4 +96,12 @@ type streamStartedMsg struct {
 	systemPrompt string
 	startTime    time.Time
 	logger       *logging.CompletionLogger
+}
+
+type mutationsGeneratedMsg struct {
+	mutations []string
+	failures  []string
+	newWorld  game.WorldState
+	userInput string
+	debug     bool
 }

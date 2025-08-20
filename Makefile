@@ -8,6 +8,9 @@ run:
 dev:
 	@./scripts/dev.sh
 
+debug:
+	@./scripts/debug.sh
+
 build:
 	@./scripts/build.sh
 
@@ -17,4 +20,4 @@ clean:
 worldstate:
 	@./scripts/worldstate.sh
 
-.PHONY: run dev build clean worldstate
+.PHONY: run dev debug build clean worldstate

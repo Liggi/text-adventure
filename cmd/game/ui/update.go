@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	
+	"textadventure/internal/game"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -83,6 +86,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case mutationsGeneratedMsg:
+		if m.loading {
+			m.messages = m.messages[:len(m.messages)-1]
+			m.world = msg.newWorld
+			
+			if msg.debug && len(msg.mutations) > 0 {
+				for _, mutation := range msg.mutations {
+					m.messages = append(m.messages, mutation)
+				}
+			}
+			
+			if len(msg.failures) > 0 && msg.debug {
+				for _, failure := range msg.failures {
+					m.messages = append(m.messages, "[ERROR] "+failure)
+				}
+			}
+			
+			m.messages = append(m.messages, "LOADING_ANIMATION")
+			
+			return m, startLLMStream(m.client, msg.userInput, m.world, m.gameHistory, m.logger, m.debug)
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -91,15 +117,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if strings.TrimSpace(m.input) != "" && !m.loading {
 				userInput := m.input
+				m.input = ""
+				
+				// Handle debug commands
+				if m.debug && strings.HasPrefix(userInput, "/") {
+					m.messages = append(m.messages, "> "+userInput)
+					switch strings.ToLower(userInput) {
+					case "/worldstate", "/world", "/debug":
+						worldInfo := fmt.Sprintf("[DEBUG] Current World State:")
+						m.messages = append(m.messages, worldInfo)
+						m.messages = append(m.messages, fmt.Sprintf("[DEBUG] Player Location: %s", m.world.Location))
+						m.messages = append(m.messages, fmt.Sprintf("[DEBUG] Player Inventory: %v", m.world.Inventory))
+						m.messages = append(m.messages, fmt.Sprintf("[DEBUG] Available Locations: %v", getLocationList(m.world)))
+						for locID, loc := range m.world.Locations {
+							m.messages = append(m.messages, fmt.Sprintf("[DEBUG] %s: %s (Items: %v, Exits: %v)", locID, loc.Title, loc.Items, loc.Exits))
+						}
+					case "/help":
+						m.messages = append(m.messages, "[DEBUG] Available commands:")
+						m.messages = append(m.messages, "[DEBUG] /worldstate - Show current world state")
+						m.messages = append(m.messages, "[DEBUG] /help - Show this help")
+					default:
+						m.messages = append(m.messages, "[DEBUG] Unknown command. Try /help")
+					}
+					m.messages = append(m.messages, "")
+					return m, nil
+				}
+				
+				// Normal game input
 				m.messages = append(m.messages, "> "+userInput)
 				m.messages = append(m.messages, "")
 				m.gameHistory = append(m.gameHistory, "Player: "+userInput)
-				m.input = ""
 				m.loading = true
 				m.animationFrame = 0
 				m.messages = append(m.messages, "LOADING_ANIMATION")
 				
-				return m, tea.Batch(startLLMStream(m.client, userInput, m.world, m.gameHistory, m.logger, m.debug), animationTimer())
+				return m, tea.Batch(startTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
 			}
 			return m, nil
 
@@ -118,4 +170,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func getLocationList(world game.WorldState) []string {
+	var locations []string
+	for locID := range world.Locations {
+		locations = append(locations, locID)
+	}
+	return locations
 }

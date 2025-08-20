@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	
 	"textadventure/internal/game"
 	"textadventure/internal/logging"
+	"textadventure/internal/mcp"
 )
 
 func animationTimer() tea.Cmd {
@@ -148,4 +150,203 @@ func buildWorldContext(world game.WorldState, gameHistory []string) string {
 	}
 
 	return context
+}
+
+type MutationRequest struct {
+	Tool string                 `json:"tool"`
+	Args map[string]interface{} `json:"args"`
+}
+
+type MutationResponse struct {
+	Mutations []MutationRequest `json:"mutations"`
+	Reasoning string            `json:"reasoning"`
+}
+
+func generateMutations(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, debug bool) (*MutationResponse, error) {
+	worldContext := buildWorldContext(world, gameHistory)
+	
+	systemPrompt := `You are a world state mutation engine for a text adventure game. 
+
+Your job: Analyze the player's intent and return ONLY the specific world mutations needed.
+
+Available MCP tools:
+- add_to_inventory: {"item": "item_id"} 
+- remove_from_inventory: {"item": "item_id"}
+- move_player: {"location": "location_id"}
+- transfer_item: {"item": "item_id", "from_location": "source", "to_location": "dest"}
+- unlock_door: {"location": "location_id", "direction": "north/south", "key_item": "key_id"}
+
+Return JSON only:
+{
+  "mutations": [{"tool": "add_to_inventory", "args": {"item": "silver_key"}}],
+  "reasoning": "Player wants to pick up the key"
+}
+
+If no mutations needed, return empty mutations array.`
+
+	req := openai.ChatCompletionRequest{
+		Model: "gpt-5-2025-08-07",
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemPrompt,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: worldContext + "PLAYER ACTION: " + userInput,
+			},
+		},
+		MaxCompletionTokens: 200,
+		ReasoningEffort:     "minimal",
+		ResponseFormat: &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		},
+	}
+
+	if debug {
+		log.Printf("Generating mutations for input: %q", userInput)
+	}
+
+	resp, err := client.CreateChatCompletion(context.Background(), req)
+	if err != nil {
+		return nil, fmt.Errorf("mutation generation failed: %w", err)
+	}
+
+	var mutationResp MutationResponse
+	content := resp.Choices[0].Message.Content
+	
+	if debug {
+		log.Printf("Raw mutation response: %s", content)
+	}
+	
+	if err := json.Unmarshal([]byte(content), &mutationResp); err != nil {
+		return nil, fmt.Errorf("failed to parse mutations: %w", err)
+	}
+
+	if debug {
+		log.Printf("Parsed mutations: %+v", mutationResp)
+	}
+
+	return &mutationResp, nil
+}
+
+func executeMutations(ctx context.Context, mutations []MutationRequest, mcpClient *mcp.WorldStateClient, debug bool) ([]string, []string) {
+	var successes []string
+	var failures []string
+	
+	for _, mutation := range mutations {
+		if debug {
+			log.Printf("Executing mutation: %s with args: %v", mutation.Tool, mutation.Args)
+		}
+		
+		var result string
+		var err error
+		
+		switch mutation.Tool {
+		case "add_to_inventory":
+			if item, ok := mutation.Args["item"].(string); ok {
+				result, err = mcpClient.AddToInventory(ctx, item)
+			} else {
+				err = fmt.Errorf("invalid item argument")
+			}
+		case "remove_from_inventory":
+			if item, ok := mutation.Args["item"].(string); ok {
+				result, err = mcpClient.RemoveFromInventory(ctx, item)
+			} else {
+				err = fmt.Errorf("invalid item argument")
+			}
+		case "move_player":
+			if location, ok := mutation.Args["location"].(string); ok {
+				result, err = mcpClient.MovePlayer(ctx, location)
+			} else {
+				err = fmt.Errorf("invalid location argument")
+			}
+		case "transfer_item":
+			item, itemOk := mutation.Args["item"].(string)
+			fromLoc, fromOk := mutation.Args["from_location"].(string)
+			toLoc, toOk := mutation.Args["to_location"].(string)
+			if itemOk && fromOk && toOk {
+				result, err = mcpClient.TransferItem(ctx, item, fromLoc, toLoc)
+			} else {
+				err = fmt.Errorf("invalid transfer arguments")
+			}
+		case "unlock_door":
+			location, locOk := mutation.Args["location"].(string)
+			direction, dirOk := mutation.Args["direction"].(string)
+			keyItem, keyOk := mutation.Args["key_item"].(string)
+			if locOk && dirOk && keyOk {
+				result, err = mcpClient.UnlockDoor(ctx, location, direction, keyItem)
+			} else {
+				err = fmt.Errorf("invalid unlock arguments")
+			}
+		default:
+			err = fmt.Errorf("unknown mutation tool: %s", mutation.Tool)
+		}
+		
+		if err != nil {
+			failure := fmt.Sprintf("MUTATION FAILED: %s - %v", mutation.Tool, err)
+			failures = append(failures, failure)
+			if debug {
+				log.Printf("Mutation failed: %s - %v", mutation.Tool, err)
+			}
+		} else {
+			success := fmt.Sprintf("MUTATION SUCCESS: %s - %s", mutation.Tool, result)
+			successes = append(successes, success)
+			if debug {
+				log.Printf("Mutation succeeded: %s - %s", mutation.Tool, result)
+			}
+		}
+	}
+	
+	return successes, failures
+}
+
+func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, mcpClient *mcp.WorldStateClient, debug bool) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		
+		if debug {
+			log.Printf("Starting two-step flow for input: %q", userInput)
+		}
+		
+		mutationResp, err := generateMutations(client, userInput, world, gameHistory, debug)
+		if err != nil {
+			if debug {
+				log.Printf("Mutation generation failed: %v", err)
+			}
+			return llmResponseMsg{response: "", err: err}
+		}
+		
+		successes, failures := executeMutations(ctx, mutationResp.Mutations, mcpClient, debug)
+		
+		newWorld := world
+		if len(successes) > 0 {
+			mcpWorld, err := mcpClient.GetWorldState(ctx)
+			if err != nil {
+				if debug {
+					log.Printf("Failed to refresh world state: %v", err)
+				}
+			} else {
+				newWorld = mcp.MCPToGameWorldState(mcpWorld)
+				if debug {
+					log.Printf("World state refreshed: player at %s, inventory: %v", newWorld.Location, newWorld.Inventory)
+				}
+			}
+		}
+		
+		var allMessages []string
+		if debug {
+			allMessages = append(allMessages, fmt.Sprintf("[DEBUG] Mutation reasoning: %s", mutationResp.Reasoning))
+			allMessages = append(allMessages, successes...)
+			allMessages = append(allMessages, failures...)
+		}
+		
+		return mutationsGeneratedMsg{
+			mutations: allMessages,
+			failures:  failures,
+			newWorld:  newWorld,
+			userInput: userInput,
+			debug:     debug,
+		}
+	}
 }

@@ -1,0 +1,45 @@
+package mcp
+
+import "textadventure/internal/game"
+
+func MCPToGameWorldState(mcpWorld *WorldState) game.WorldState {
+	gameLocations := make(map[string]game.LocationInfo)
+	
+	for locID, mcpLoc := range mcpWorld.Locations {
+		gameLocations[locID] = game.LocationInfo{
+			Title:       mcpLoc.Title,
+			Description: mcpLoc.Description,
+			Items:       mcpLoc.Items,
+			Exits:       mcpLoc.Exits,
+		}
+	}
+	
+	return game.WorldState{
+		Location:  mcpWorld.Player.Location,
+		Inventory: mcpWorld.Player.Inventory,
+		Locations: gameLocations,
+	}
+}
+
+func GameToMCPWorldState(gameWorld game.WorldState) *WorldState {
+	mcpLocations := make(map[string]Location)
+	
+	for locID, gameLoc := range gameWorld.Locations {
+		mcpLocations[locID] = Location{
+			Title:       gameLoc.Title,
+			Description: gameLoc.Description,
+			Items:       gameLoc.Items,
+			Exits:       gameLoc.Exits,
+			DoorStates:  make(map[string]Door),
+		}
+	}
+	
+	return &WorldState{
+		Player: Player{
+			Location:  gameWorld.Location,
+			Inventory: gameWorld.Inventory,
+		},
+		Locations: mcpLocations,
+		Items:     make(map[string]Item),
+	}
+}
