@@ -20,4 +20,7 @@ clean:
 worldstate:
 	@./scripts/worldstate.sh
 
-.PHONY: run dev debug build clean worldstate
+reset:
+	@./scripts/reset.sh
+
+.PHONY: run dev debug build clean worldstate reset

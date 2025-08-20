@@ -41,22 +41,75 @@ DEFAULT_WORLD_STATE = {
             "title": "Old Foyer",
             "description": "A dusty foyer with motes drifting in shafts of light",
             "items": ["silver_key"],
-            "exits": {"north": "study"},
+            "exits": {"north": "study", "east": "library", "west": "kitchen"},
             "door_states": {"north": {"locked": True, "description": "locked oak door"}}
         },
         "study": {
             "title": "Quiet Study", 
             "description": "A quiet study with a heavy oak desk",
+            "items": ["brass_compass"],
+            "exits": {"south": "foyer", "up": "attic"},
+            "door_states": {}
+        },
+        "library": {
+            "title": "Dusty Library",
+            "description": "Towering bookshelves filled with ancient tomes and forgotten knowledge",
+            "items": ["leather_journal", "crystal_orb"],
+            "exits": {"west": "foyer"},
+            "door_states": {}
+        },
+        "kitchen": {
+            "title": "Abandoned Kitchen",
+            "description": "A once-grand kitchen now covered in dust and cobwebs",
+            "items": ["iron_pot"],
+            "exits": {"east": "foyer", "down": "cellar"},
+            "door_states": {"down": {"locked": True, "description": "heavy wooden trapdoor"}}
+        },
+        "attic": {
+            "title": "Cramped Attic",
+            "description": "A low-ceilinged space filled with forgotten memories and mysterious shadows",
+            "items": ["golden_locket"],
+            "exits": {"down": "study"},
+            "door_states": {}
+        },
+        "cellar": {
+            "title": "Stone Cellar",
+            "description": "Cool stone walls lined with empty wine racks and mysterious alcoves",
             "items": [],
-            "exits": {"south": "foyer"},
+            "exits": {"up": "kitchen"},
             "door_states": {}
         }
     },
     "items": {
         "silver_key": {
             "title": "Silver Key",
-            "description": "A tarnished silver key",
+            "description": "A tarnished silver key with intricate engravings",
             "can_unlock": ["foyer_north"]
+        },
+        "brass_compass": {
+            "title": "Brass Compass",
+            "description": "An antique compass with a needle that spins mysteriously",
+            "can_unlock": []
+        },
+        "leather_journal": {
+            "title": "Leather Journal",
+            "description": "A weathered journal filled with cryptic notes and sketches",
+            "can_unlock": []
+        },
+        "crystal_orb": {
+            "title": "Crystal Orb",
+            "description": "A clear crystal sphere that seems to shimmer with inner light",
+            "can_unlock": []
+        },
+        "iron_pot": {
+            "title": "Iron Pot",
+            "description": "A heavy cast iron pot, blackened with age",
+            "can_unlock": ["kitchen_down"]
+        },
+        "golden_locket": {
+            "title": "Golden Locket",
+            "description": "An ornate locket that feels warm to the touch",
+            "can_unlock": []
         }
     }
 }
