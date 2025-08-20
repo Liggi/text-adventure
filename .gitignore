@@ -5,6 +5,3 @@ world_state.json
 mcp-server/.venv/
 mcp-server/__pycache__/
 .claude/
-Makefile.new
-test_api.go
-test_reasoning.go
