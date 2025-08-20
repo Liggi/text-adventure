@@ -61,10 +61,12 @@ func (m *Model) SetMCPClient(client *mcp.WorldStateClient) {
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return initialLookAroundCmd()
 }
 
 type animationTickMsg struct{}
+
+type initialLookAroundMsg struct{}
 
 type llmResponseMsg struct {
 	response string
@@ -105,4 +107,10 @@ type mutationsGeneratedMsg struct {
 	newWorld  game.WorldState
 	userInput string
 	debug     bool
+}
+
+func initialLookAroundCmd() tea.Cmd {
+	return func() tea.Msg {
+		return initialLookAroundMsg{}
+	}
 }

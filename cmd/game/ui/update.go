@@ -11,6 +11,19 @@ import (
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case initialLookAroundMsg:
+		if !m.loading && m.mcpClient != nil {
+			userInput := "look around"
+			// Don't add the user input to messages - keep it invisible
+			m.gameHistory = append(m.gameHistory, "Player: "+userInput)
+			m.loading = true
+			m.animationFrame = 0
+			m.messages = append(m.messages, "LOADING_ANIMATION")
+			
+			return m, tea.Batch(startTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
+		}
+		return m, nil
+		
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
