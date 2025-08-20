@@ -305,7 +305,7 @@ If no mutations needed, return empty mutations array.`, toolDescriptions)
 	return &mutationResp, nil
 }
 
-func generateSensoryEvents(client *openai.Client, userInput string, successfulMutations []string, world game.WorldState, debug bool) (*SensoryEventResponse, error) {
+func generateSensoryEvents(client *openai.Client, userInput string, successfulMutations []string, world game.WorldState, debug bool, actingNPCID ...string) (*SensoryEventResponse, error) {
 
 	systemPrompt := `You are a sensory event generator for a text adventure game. Generate descriptive auditory events for player actions.
 
@@ -330,12 +330,27 @@ Return JSON only:
 
 If no sound, return empty auditory_events array.`
 
+	var actionLabel string
+	var currentLocation string
+	
+	if len(actingNPCID) > 0 && actingNPCID[0] != "" {
+		actionLabel = fmt.Sprintf("NPC %s ACTION", strings.ToUpper(actingNPCID[0]))
+		if npc, exists := world.NPCs[actingNPCID[0]]; exists {
+			currentLocation = npc.Location
+		} else {
+			currentLocation = world.Location
+		}
+	} else {
+		actionLabel = "Player action"
+		currentLocation = world.Location
+	}
+	
 	var contextMsg string
 	if len(successfulMutations) > 0 {
 		mutationContext := "Successful mutations:\n" + strings.Join(successfulMutations, "\n")
-		contextMsg = fmt.Sprintf("Player action: %s\nCurrent location: %s\n\n%s", userInput, world.Location, mutationContext)
+		contextMsg = fmt.Sprintf("%s: %s\nCurrent location: %s\n\n%s", actionLabel, userInput, currentLocation, mutationContext)
 	} else {
-		contextMsg = fmt.Sprintf("Player action: %s\nCurrent location: %s", userInput, world.Location)
+		contextMsg = fmt.Sprintf("%s: %s\nCurrent location: %s", actionLabel, userInput, currentLocation)
 	}
 	
 	req := openai.ChatCompletionRequest{
@@ -571,7 +586,12 @@ func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 			}
 		}
 		
-		sensoryEvents, err := generateSensoryEvents(client, userInput, successes, newWorld, debug)
+		var sensoryEvents *SensoryEventResponse
+		if len(actingNPCID) > 0 && actingNPCID[0] != "" {
+			sensoryEvents, err = generateSensoryEvents(client, userInput, successes, newWorld, debug, actingNPCID[0])
+		} else {
+			sensoryEvents, err = generateSensoryEvents(client, userInput, successes, newWorld, debug)
+		}
 		if err != nil {
 			if debug {
 				log.Printf("Failed to generate sensory events: %v", err)
