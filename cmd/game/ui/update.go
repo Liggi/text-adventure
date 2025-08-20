@@ -9,6 +9,7 @@ import (
 	"textadventure/internal/game"
 	"textadventure/internal/game/actors"
 	"textadventure/internal/game/director"
+	"textadventure/internal/game/narration"
 	"textadventure/internal/game/sensory"
 )
 
@@ -126,25 +127,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case streamStartedMsg:
+	case narration.StreamStartedMsg:
 		if m.loading {
 			m.messages = m.messages[:len(m.messages)-1]
 			m.streaming = true
 			m.currentResponse = ""
 			m.messages = append(m.messages, "")
 		}
-		return m, readNextChunk(msg.stream, msg.debug, &msg, "")
+		return m, narration.ReadNextChunk(msg.Stream, msg.Debug, &msg, "")
 
-	case llmStreamChunkMsg:
+	case narration.StreamChunkMsg:
 		if m.streaming {
-			m.currentResponse += msg.chunk
+			m.currentResponse += msg.Chunk
 			if len(m.messages) > 0 {
 				m.messages[len(m.messages)-1] = m.currentResponse
 			}
 		}
-		return m, readNextChunk(msg.stream, msg.debug, msg.completionCtx, m.currentResponse)
+		return m, narration.ReadNextChunk(msg.Stream, msg.Debug, msg.CompletionCtx, m.currentResponse)
 
-	case llmStreamCompleteMsg:
+	case narration.StreamCompleteMsg:
 		if m.streaming {
 			m.streaming = false
 			m.loading = false
@@ -166,16 +167,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case llmResponseMsg:
+	case narration.StreamErrorMsg:
 		if m.loading && !m.streaming {
 			m.messages = m.messages[:len(m.messages)-1]
-			if msg.err != nil {
-				errorMsg := "Error: " + msg.err.Error()
+			if msg.Err != nil {
+				errorMsg := "Error: " + msg.Err.Error()
 				m.messages = append(m.messages, errorMsg)
-				m.gameHistory = append(m.gameHistory, "Error: "+msg.err.Error())
+				m.gameHistory = append(m.gameHistory, "Error: "+msg.Err.Error())
 			} else {
-				m.messages = append(m.messages, msg.response)
-				m.gameHistory = append(m.gameHistory, "Narrator: "+msg.response)
+				m.messages = append(m.messages, msg.Response)
+				m.gameHistory = append(m.gameHistory, "Narrator: "+msg.Response)
 			}
 			m.messages = append(m.messages, "")
 			m.loading = false
@@ -186,9 +187,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.streaming {
 			m.streaming = false
 			m.loading = false
-			if msg.err != nil {
+			if msg.Err != nil {
 				if len(m.messages) > 0 {
-					m.messages[len(m.messages)-1] = "Error: " + msg.err.Error()
+					m.messages[len(m.messages)-1] = "Error: " + msg.Err.Error()
 				}
 				m.messages = append(m.messages, "")
 			}
@@ -232,7 +233,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.messages = append(m.messages, "LOADING_ANIMATION")
 				
 				combinedEvents := &sensory.SensoryEventResponse{AuditoryEvents: m.accumulatedSensoryEvents}
-				return m, startLLMStream(m.client, msg.UserInput, m.world, m.gameHistory, m.logger, m.debug, msg.Successes, combinedEvents, msg.ActingNPCID)
+				return m, narration.StartLLMStream(m.client, msg.UserInput, m.world, m.gameHistory, m.logger, m.debug, msg.Successes, combinedEvents, msg.ActingNPCID)
 			} else {
 				m.loading = false
 				

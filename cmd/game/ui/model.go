@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"time"
 	
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sashabaranov/go-openai"
@@ -95,39 +94,6 @@ type narrationTurnMsg struct {
 }
 
 
-type llmResponseMsg struct {
-	response string
-	err      error
-}
-
-type llmStreamChunkMsg struct {
-	chunk         string
-	stream        *openai.ChatCompletionStream
-	debug         bool
-	completionCtx *streamStartedMsg
-}
-
-type llmStreamCompleteMsg struct {
-	world         game.WorldState
-	userInput     string
-	systemPrompt  string
-	response      string
-	startTime     time.Time
-	logger        *logging.CompletionLogger
-	debug         bool
-	sensoryEvents *sensory.SensoryEventResponse
-}
-
-type streamStartedMsg struct {
-	stream        *openai.ChatCompletionStream
-	debug         bool
-	world         game.WorldState
-	userInput     string
-	systemPrompt  string
-	startTime     time.Time
-	logger        *logging.CompletionLogger
-	sensoryEvents *sensory.SensoryEventResponse
-}
 
 func initialLookAroundCmd() tea.Cmd {
 	return func() tea.Msg {
