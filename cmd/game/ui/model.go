@@ -68,6 +68,8 @@ type animationTickMsg struct{}
 
 type initialLookAroundMsg struct{}
 
+type npcTurnMsg struct{}
+
 type llmResponseMsg struct {
 	response string
 	err      error
@@ -112,5 +114,11 @@ type mutationsGeneratedMsg struct {
 func initialLookAroundCmd() tea.Cmd {
 	return func() tea.Msg {
 		return initialLookAroundMsg{}
+	}
+}
+
+func npcTurnCmd() tea.Cmd {
+	return func() tea.Msg {
+		return npcTurnMsg{}
 	}
 }

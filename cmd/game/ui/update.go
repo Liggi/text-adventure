@@ -24,6 +24,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 		
+	case npcTurnMsg:
+		if !m.loading {
+			if m.debug {
+				m.messages = append(m.messages, "[DEBUG] Elena takes her turn... [does nothing]")
+				m.messages = append(m.messages, "")
+			}
+		}
+		return m, nil
+		
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -67,6 +76,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			
 			m.messages = append(m.messages, "")
+			
+			// Trigger NPC turn after player turn completes
+			return m, npcTurnCmd()
 		}
 		return m, nil
 

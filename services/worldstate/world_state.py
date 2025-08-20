@@ -111,6 +111,11 @@ DEFAULT_WORLD_STATE = {
             "description": "An ornate locket that feels warm to the touch",
             "can_unlock": []
         }
+    },
+    "npcs": {
+        "elena": {
+            "location": "library"
+        }
     }
 }
 
