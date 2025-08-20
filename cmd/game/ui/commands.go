@@ -270,21 +270,21 @@ If no mutations needed, return empty mutations array.`, toolDescriptions)
 
 func generateSensoryEvents(client *openai.Client, userInput string, successfulMutations []string, world game.WorldState, debug bool) (*SensoryEventResponse, error) {
 
-	systemPrompt := `You are a sensory event generator for a text adventure game. Generate simple auditory events for player actions.
+	systemPrompt := `You are a sensory event generator for a text adventure game. Generate descriptive auditory events for player actions.
 
 Rules:
 - Generate only ONE event per action, at the location where it happens
-- Use simple descriptions: "footsteps", "door creaking", "loud bang"
+- Use objective third-person descriptions: "someone shouted", "footsteps", "door creaking"
+- Capture actual content when relevant: include spoken words, specific sounds
 - Volume levels: "quiet", "moderate", "loud"
 - Quiet actions like "look around" = no events
-- Loud actions like "stomp", "shout" = one loud event
 
 Return JSON only:
 {
   "auditory_events": [
     {
       "type": "auditory", 
-      "description": "loud stomping",
+      "description": "someone shouted 'Elena, I'm here!'",
       "location": "foyer",
       "volume": "loud"
     }
