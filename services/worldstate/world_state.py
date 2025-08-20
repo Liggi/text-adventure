@@ -218,6 +218,11 @@ async def transfer_item(item: str, from_location: str, to_location: str) -> str:
         if item not in state["player"]["inventory"]:
             return f"Error: Item '{item}' not in player inventory"
         state["player"]["inventory"].remove(item)
+    # Handle NPC inventory
+    elif from_location in state.get("npcs", {}):
+        if item not in state["npcs"][from_location].get("inventory", []):
+            return f"Error: Item '{item}' not in {from_location}'s inventory"
+        state["npcs"][from_location]["inventory"].remove(item)
     else:
         # Validate location exists
         if from_location not in state["locations"]:
@@ -229,6 +234,11 @@ async def transfer_item(item: str, from_location: str, to_location: str) -> str:
     # Add to destination
     if to_location == "player":
         state["player"]["inventory"].append(item)
+    # Handle NPC inventory
+    elif to_location in state.get("npcs", {}):
+        if "inventory" not in state["npcs"][to_location]:
+            state["npcs"][to_location]["inventory"] = []
+        state["npcs"][to_location]["inventory"].append(item)
     else:
         if to_location not in state["locations"]:
             return f"Error: Location '{to_location}' does not exist"

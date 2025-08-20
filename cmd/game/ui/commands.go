@@ -24,7 +24,7 @@ func animationTimer() tea.Cmd {
 	})
 }
 
-func startLLMStream(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, mutationResults []string, sensoryEvents *SensoryEventResponse) tea.Cmd {
+func startLLMStream(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, mutationResults []string, sensoryEvents *SensoryEventResponse, actingNPCID ...string) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
 			log.Printf("Starting LLM stream with input: %q", userInput)
@@ -151,16 +151,29 @@ func readNextChunk(stream *openai.ChatCompletionStream, debug bool, completionCt
 	}
 }
 
-func buildWorldContext(world game.WorldState, gameHistory []string) string {
-	currentLoc := world.Locations[world.Location]
+func buildWorldContext(world game.WorldState, gameHistory []string, actingNPCID ...string) string {
+	var currentLocation string
+	
+	if len(actingNPCID) > 0 && actingNPCID[0] != "" {
+		npc, exists := world.NPCs[actingNPCID[0]]
+		if exists {
+			currentLocation = npc.Location
+		} else {
+			currentLocation = world.Location
+		}
+	} else {
+		currentLocation = world.Location
+	}
+	
+	currentLoc := world.Locations[currentLocation]
 	context := "WORLD STATE:\n"
-	context += "Current Location: " + currentLoc.Title + " (" + world.Location + ")\n"
+	context += "Current Location: " + currentLoc.Title + " (" + currentLocation + ")\n"
 	context += currentLoc.Description + "\n"
 	
 	// Add NPCs present in this location
 	var npcsHere []string
 	for npcID, npc := range world.NPCs {
-		if npc.Location == world.Location {
+		if npc.Location == currentLocation {
 			npcsHere = append(npcsHere, npcID)
 		}
 	}
@@ -194,8 +207,8 @@ type MutationResponse struct {
 	Reasoning string            `json:"reasoning"`
 }
 
-func generateMutations(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool) (*MutationResponse, error) {
-	worldContext := buildWorldContext(world, gameHistory)
+func generateMutations(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool, actingNPCID string) (*MutationResponse, error) {
+	worldContext := buildWorldContext(world, gameHistory, actingNPCID)
 	
 	ctx := context.Background()
 	
@@ -366,7 +379,7 @@ If no sound, return empty auditory_events array.`
 	return &eventResp, nil
 }
 
-func executeMutations(ctx context.Context, mutations []MutationRequest, mcpClient *mcp.WorldStateClient, debug bool) ([]string, []string) {
+func executeMutations(ctx context.Context, mutations []MutationRequest, mcpClient *mcp.WorldStateClient, debug bool, world game.WorldState, actingNPCID string) ([]string, []string) {
 	var successes []string
 	var failures []string
 	
@@ -381,7 +394,16 @@ func executeMutations(ctx context.Context, mutations []MutationRequest, mcpClien
 		switch mutation.Tool {
 		case "add_to_inventory":
 			if item, ok := mutation.Args["item"].(string); ok {
-				result, err = mcpClient.AddToInventory(ctx, item)
+				if actingNPCID != "" {
+					npc, exists := world.NPCs[actingNPCID]
+					if exists {
+						result, err = mcpClient.TransferItem(ctx, item, npc.Location, actingNPCID)
+					} else {
+						err = fmt.Errorf("unknown NPC: %s", actingNPCID)
+					}
+				} else {
+					result, err = mcpClient.AddToInventory(ctx, item)
+				}
 			} else {
 				err = fmt.Errorf("invalid item argument")
 			}
@@ -437,12 +459,12 @@ func executeMutations(ctx context.Context, mutations []MutationRequest, mcpClien
 	return successes, failures
 }
 
-func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool) ([]string, []string, error) {
+func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool, actingNPCID string) ([]string, []string, error) {
 	const maxRetries = 3
 	var allSuccesses []string
 	var finalFailures []string
 	
-	mutationResp, err := generateMutations(client, userInput, world, gameHistory, mcpClient, debug)
+	mutationResp, err := generateMutations(client, userInput, world, gameHistory, mcpClient, debug, actingNPCID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("initial mutation generation failed: %w", err)
 	}
@@ -455,7 +477,7 @@ func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.
 			log.Printf("Retry attempt %d with %d mutations", retryCount, len(pendingMutations))
 		}
 		
-		successes, failures := executeMutations(ctx, pendingMutations, mcpClient, debug)
+		successes, failures := executeMutations(ctx, pendingMutations, mcpClient, debug, world, actingNPCID)
 		
 		allSuccesses = append(allSuccesses, successes...)
 		
@@ -473,7 +495,7 @@ func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.
 		
 		retryPrompt := fmt.Sprintf("RETRY: Previous mutations failed. User input: %q\n\nFailed mutations and errors:\n%s\n\nPlease generate corrected mutations or skip mutations that are impossible/malformed.", userInput, strings.Join(failures, "\n"))
 		
-		retryResp, err := generateMutations(client, retryPrompt, world, gameHistory, mcpClient, debug)
+		retryResp, err := generateMutations(client, retryPrompt, world, gameHistory, mcpClient, debug, actingNPCID)
 		if err != nil {
 			if debug {
 				log.Printf("Retry mutation generation failed: %v", err)
@@ -489,7 +511,7 @@ func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.
 	return allSuccesses, finalFailures, nil
 }
 
-func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, mcpClient *mcp.WorldStateClient, debug bool) tea.Cmd {
+func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, mcpClient *mcp.WorldStateClient, debug bool, actingNPCID ...string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		
@@ -497,7 +519,12 @@ func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 			log.Printf("Starting two-step flow for input: %q", userInput)
 		}
 		
-		successes, failures, err := generateAndExecuteMutationsWithRetries(ctx, client, userInput, world, gameHistory, mcpClient, debug)
+		var npcID string
+		if len(actingNPCID) > 0 {
+			npcID = actingNPCID[0]
+		}
+		
+		successes, failures, err := generateAndExecuteMutationsWithRetries(ctx, client, userInput, world, gameHistory, mcpClient, debug, npcID)
 		if err != nil {
 			if debug {
 				log.Printf("Mutation retry system failed: %v", err)
@@ -542,6 +569,7 @@ func startTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 			newWorld:      newWorld,
 			userInput:     userInput,
 			debug:         debug,
+			actingNPCID:   npcID,
 		}
 	}
 }
@@ -792,6 +820,127 @@ Return only your thoughts, nothing else. Keep it to one line.`, npcID)
 			npcID:    npcID,
 			thoughts: "",
 			debug:    debug,
+		}
+	}
+}
+
+func generateNPCAction(client *openai.Client, npcID string, npcThoughts string, world game.WorldState, sensoryEvents *SensoryEventResponse, debug bool) (string, error) {
+	if npcThoughts == "" {
+		return "", nil
+	}
+
+	worldContext := buildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
+	
+	systemPrompt := `Based on your current thoughts and situation, decide what single action you want to take, or do nothing.
+
+Express your action as a simple, clear statement of intent. Your action should follow logically from your current thoughts.
+
+You can take any reasonable action - move somewhere, interact with objects, investigate sounds, communicate, or simply observe. 
+
+Return only a brief action statement, or an empty string if you don't want to act.`
+
+	req := openai.ChatCompletionRequest{
+		Model: "gpt-5-2025-08-07",
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemPrompt,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: worldContext + "\n\nYour current thoughts: " + npcThoughts + "\n\nWhat action do you want to take?",
+			},
+		},
+		MaxCompletionTokens: 50,
+		ReasoningEffort:     "minimal",
+	}
+
+	resp, err := client.CreateChatCompletion(context.Background(), req)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate NPC action: %w", err)
+	}
+
+	action := strings.TrimSpace(resp.Choices[0].Message.Content)
+	
+	if debug {
+		log.Printf("NPC %s decided to: \"%s\"", npcID, action)
+	}
+
+	return action, nil
+}
+
+func generateNPCTurn(client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *SensoryEventResponse) tea.Cmd {
+	return func() tea.Msg {
+		thoughts := ""
+		if debug {
+			worldContext := buildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
+			
+			if debug {
+				log.Printf("=== NPC BRAIN: %s ===", npcID)
+				log.Printf("World context sent to %s:", npcID)
+				log.Printf("%s", worldContext)
+				log.Printf("=== END NPC CONTEXT ===")
+			}
+			
+			systemPrompt := fmt.Sprintf(`You are %s, an NPC in the game world. Generate realistic internal thoughts based on your current situation.
+
+CONTEXT EXPLANATION:
+- WORLD STATE: Describes your current room and environment
+- Available Items Here: Items you can see in your room (you don't have them, they're just present)
+- People here: Other people in your room with you
+- RECENT SOUNDS: Actual sounds you heard (if any). If no sounds listed, everything is quiet
+- Only react to information actually provided - don't invent events that didn't happen
+
+Your thoughts should be:
+- Brief and natural (10-20 words total)
+- Single line, not multiple sentences  
+- Based only on what you can actually observe or hear
+- Simple language, like actual inner monologue
+
+Return only your thoughts, nothing else. Keep it to one line.`, npcID)
+
+			req := openai.ChatCompletionRequest{
+				Model: "gpt-5-2025-08-07",
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role:    openai.ChatMessageRoleSystem,
+						Content: systemPrompt,
+					},
+					{
+						Role:    openai.ChatMessageRoleUser,
+						Content: worldContext + "\n\nGenerate your internal thoughts about recent events.",
+					},
+				},
+				MaxCompletionTokens: 100,
+				ReasoningEffort:     "minimal",
+			}
+
+			resp, err := client.CreateChatCompletion(context.Background(), req)
+			if err != nil {
+				if debug {
+					log.Printf("NPC brain error for %s: %v", npcID, err)
+				}
+				thoughts = fmt.Sprintf("*%s seems distracted*", npcID)
+			} else {
+				thoughts = resp.Choices[0].Message.Content
+				if debug {
+					log.Printf("NPC %s generated thoughts: %s", npcID, thoughts)
+				}
+			}
+		}
+		
+		action, err := generateNPCAction(client, npcID, thoughts, world, sensoryEvents, debug)
+		if err != nil && debug {
+			log.Printf("NPC action generation error for %s: %v", npcID, err)
+			action = ""
+		}
+		
+		return npcActionMsg{
+			npcID:         npcID,
+			thoughts:      thoughts,
+			action:        action,
+			sensoryEvents: sensoryEvents,
+			debug:         debug,
 		}
 	}
 }

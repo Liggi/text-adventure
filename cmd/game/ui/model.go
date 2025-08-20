@@ -89,6 +89,14 @@ type npcThoughtsMsg struct {
 	debug    bool
 }
 
+type npcActionMsg struct {
+	npcID         string
+	thoughts      string
+	action        string
+	sensoryEvents *SensoryEventResponse
+	debug         bool
+}
+
 type llmResponseMsg struct {
 	response string
 	err      error
@@ -131,6 +139,7 @@ type mutationsGeneratedMsg struct {
 	newWorld      game.WorldState
 	userInput     string
 	debug         bool
+	actingNPCID   string
 }
 
 func initialLookAroundCmd() tea.Cmd {

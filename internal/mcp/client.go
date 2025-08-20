@@ -49,8 +49,9 @@ type Item struct {
 }
 
 type NPC struct {
-	Location   string `json:"location"`
-	DebugColor string `json:"debug_color"`
+	Location   string   `json:"location"`
+	DebugColor string   `json:"debug_color"`
+	Inventory  []string `json:"inventory"`
 }
 
 func NewWorldStateClient(debug bool) (*WorldStateClient, error) {
