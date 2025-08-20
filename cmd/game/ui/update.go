@@ -31,6 +31,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 		
+	case narrationTurnMsg:
+		if !m.loading && m.turnPhase == Narration {
+			m.loading = true
+			m.animationFrame = 0
+			m.messages = append(m.messages, "LOADING_ANIMATION")
+			
+			userInput := "narrate recent events"
+			return m, tea.Batch(startTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.logger, m.mcpClient, m.debug), animationTimer())
+		}
+		return m, nil
+		
 	case npcThoughtsMsg:
 		if msg.debug && msg.thoughts != "" {
 			// Use the NPC's defined debug color
@@ -144,21 +155,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			
 			m.messages = append(m.messages, "")
 			
-			switch m.turnPhase {
-			case PlayerTurn:
-				m.turnPhase = NPCTurns
-				m.npcTurnComplete = false
-				return m, npcTurnCmd(msg.sensoryEvents)
-			case NPCTurns:
+			if m.turnPhase == Narration {
 				m.turnPhase = PlayerTurn
-				m.npcTurnComplete = false
-				return m, nil
-			case Narration:
-				m.turnPhase = PlayerTurn
-				return m, nil
-			default:
-				return m, nil
+				m.accumulatedSensoryEvents = []SensoryEvent{}
 			}
+			return m, nil
 		}
 		return m, nil
 
@@ -220,9 +221,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			
-			m.messages = append(m.messages, "LOADING_ANIMATION")
+			if msg.sensoryEvents != nil {
+				m.accumulatedSensoryEvents = append(m.accumulatedSensoryEvents, msg.sensoryEvents.AuditoryEvents...)
+			}
 			
-			return m, startLLMStream(m.client, msg.userInput, m.world, m.gameHistory, m.logger, m.debug, msg.successes, msg.sensoryEvents, msg.actingNPCID)
+			if m.turnPhase == Narration {
+				m.messages = append(m.messages, "LOADING_ANIMATION")
+				
+				combinedEvents := &SensoryEventResponse{AuditoryEvents: m.accumulatedSensoryEvents}
+				return m, startLLMStream(m.client, msg.userInput, m.world, m.gameHistory, m.logger, m.debug, msg.successes, combinedEvents, msg.actingNPCID)
+			} else {
+				m.loading = false
+				
+				// Trigger turn phase transitions directly
+				switch m.turnPhase {
+				case PlayerTurn:
+					m.turnPhase = NPCTurns
+					m.npcTurnComplete = false
+					return m, npcTurnCmd(msg.sensoryEvents)
+				case NPCTurns:
+					m.turnPhase = Narration
+					m.npcTurnComplete = false
+					return m, startNarrationCmd(m.world, m.gameHistory, m.debug)
+				default:
+					return m, nil
+				}
+			}
 		}
 		return m, nil
 

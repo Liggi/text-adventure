@@ -32,23 +32,24 @@ const (
 )
 
 type Model struct {
-	messages        []string
-	input           string
-	cursor          int
-	width           int
-	height          int
-	client          *openai.Client
-	mcpClient       *mcp.WorldStateClient
-	debug           bool
-	loading         bool
-	streaming       bool
-	currentResponse string
-	animationFrame  int
-	world           game.WorldState
-	gameHistory     []string
-	logger          *logging.CompletionLogger
-	turnPhase       TurnPhase
-	npcTurnComplete bool
+	messages                []string
+	input                   string
+	cursor                  int
+	width                   int
+	height                  int
+	client                  *openai.Client
+	mcpClient               *mcp.WorldStateClient
+	debug                   bool
+	loading                 bool
+	streaming               bool
+	currentResponse         string
+	animationFrame          int
+	world                   game.WorldState
+	gameHistory             []string
+	logger                  *logging.CompletionLogger
+	turnPhase               TurnPhase
+	npcTurnComplete         bool
+	accumulatedSensoryEvents []SensoryEvent
 }
 
 func NewModel(
@@ -66,16 +67,17 @@ func NewModel(
 	}
 	
 	return Model{
-		messages:        messages,
-		input:           "",
-		cursor:          0,
-		client:          client,
-		debug:           debug,
-		world:           world,
-		gameHistory:     []string{},
-		logger:          logger,
-		turnPhase:       PlayerTurn,
-		npcTurnComplete: false,
+		messages:                messages,
+		input:                   "",
+		cursor:                  0,
+		client:                  client,
+		debug:                   debug,
+		world:                   world,
+		gameHistory:             []string{},
+		logger:                  logger,
+		turnPhase:               PlayerTurn,
+		npcTurnComplete:         false,
+		accumulatedSensoryEvents: []SensoryEvent{},
 	}
 }
 
@@ -93,6 +95,12 @@ type initialLookAroundMsg struct{}
 
 type npcTurnMsg struct{
 	sensoryEvents *SensoryEventResponse
+}
+
+type narrationTurnMsg struct {
+	world       game.WorldState
+	gameHistory []string
+	debug       bool
 }
 
 type npcThoughtsMsg struct {
@@ -163,5 +171,15 @@ func initialLookAroundCmd() tea.Cmd {
 func npcTurnCmd(sensoryEvents *SensoryEventResponse) tea.Cmd {
 	return func() tea.Msg {
 		return npcTurnMsg{sensoryEvents: sensoryEvents}
+	}
+}
+
+func startNarrationCmd(world game.WorldState, gameHistory []string, debug bool) tea.Cmd {
+	return func() tea.Msg {
+		return narrationTurnMsg{
+			world:       world,
+			gameHistory: gameHistory,
+			debug:       debug,
+		}
 	}
 }
