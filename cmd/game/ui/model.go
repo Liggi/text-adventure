@@ -10,6 +10,7 @@ import (
 	"textadventure/internal/game"
 	"textadventure/internal/game/director"
 	"textadventure/internal/game/sensory"
+	"textadventure/internal/llm"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"
 )
@@ -34,6 +35,7 @@ type Model struct {
 	width                   int
 	height                  int
 	client                  *openai.Client
+	llmService              *llm.Service
 	mcpClient               *mcp.WorldStateClient
 	loggers                 GameLoggers
 	director                *director.Director
@@ -51,6 +53,7 @@ type Model struct {
 
 func NewModel(
 	client *openai.Client,
+	llmService *llm.Service,
 	mcpClient *mcp.WorldStateClient,
 	loggers GameLoggers,
 	world game.WorldState,
@@ -68,6 +71,7 @@ func NewModel(
 		input:                   "",
 		cursor:                  0,
 		client:                  client,
+		llmService:              llmService,
 		mcpClient:               mcpClient,
 		loggers:                 loggers,
 		director:                director.NewDirector(client, mcpClient, loggers.Debug),

@@ -30,7 +30,7 @@ type CompletionRequest struct {
 }
 
 func (c *Client) CreateCompletionStream(ctx context.Context, req CompletionRequest) (*openai.ChatCompletionStream, error) {
-	worldContext := req.History.BuildContext(req.World)
+	worldContext := game.BuildWorldContext(req.World, req.History.GetEntries())
 	systemPrompt := `You are both narrator and world simulator for a text adventure game. You have complete knowledge of the world state.
 
 Your job: Respond to player actions with 2-4 sentence vivid narration that feels natural and immersive.

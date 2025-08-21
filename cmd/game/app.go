@@ -9,6 +9,7 @@ import (
 
 	"textadventure/cmd/game/ui"
 	"textadventure/internal/debug"
+	"textadventure/internal/llm"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"
 )
@@ -23,6 +24,7 @@ func createApp() (ui.Model, error) {
 	debugMode := os.Getenv("DEBUG") == "1" || os.Getenv("DEBUG") == "true"
 	
 	debugLogger := debug.NewLogger(debugMode)
+	llmService := llm.NewService(apiKey, debugLogger)
 	debugLogger.Println("Starting text adventure with debug logging")
 	
 	logger, err := logging.NewCompletionLogger()
@@ -58,7 +60,7 @@ func createApp() (ui.Model, error) {
 		Debug:      debugLogger,
 		Completion: logger,
 	}
-	model := ui.NewModel(client, mcpClient, loggers, world)
+	model := ui.NewModel(client, llmService, mcpClient, loggers, world)
 	
 	return model, nil
 }
