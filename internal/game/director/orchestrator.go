@@ -97,35 +97,25 @@ If no mutations needed, return empty mutations array.`, toolDescriptions, buildW
 		},
 	}
 
-	debugLogger.Printf("=== MUTATION GENERATION START ===")
-	debugLogger.Printf("Action: %q", userInput)
-	debugLogger.Printf("System prompt length: %d chars", len(systemPrompt))
+	debugLogger.Printf("Processing action: %q", userInput)
 
 	resp, err := client.CreateChatCompletion(context.Background(), req)
 	if err != nil {
-		debugLogger.Printf("Mutation generation API error: %v", err)
 		return nil, fmt.Errorf("mutation generation failed: %w", err)
 	}
 
-	debugLogger.Printf("API Response - Choices length: %d", len(resp.Choices))
-	if len(resp.Choices) > 0 {
-		debugLogger.Printf("Response choice 0 - Content: %q", resp.Choices[0].Message.Content)
-	}
 
 	var actionPlan ActionPlan
 	content := resp.Choices[0].Message.Content
 	
 	if err := json.Unmarshal([]byte(content), &actionPlan); err != nil {
-		debugLogger.Printf("JSON unmarshal failed: %v", err)
-		debugLogger.Printf("Content was: %q", content)
+		debugLogger.Printf("Failed to parse LLM response: %v", err)
 		return &ActionPlan{Mutations: []MutationRequest{}}, nil
 	}
 
-	debugLogger.Printf("Generated %d mutations", len(actionPlan.Mutations))
-	for i, mutation := range actionPlan.Mutations {
-		debugLogger.Printf("  Mutation %d: %s with args %v", i, mutation.Tool, mutation.Args)
+	if len(actionPlan.Mutations) > 0 {
+		debugLogger.Printf("Generated %d mutations", len(actionPlan.Mutations))
 	}
-	debugLogger.Printf("=== MUTATION GENERATION END ===")
 
 	return &actionPlan, nil
 }
@@ -145,7 +135,6 @@ func ExecuteIntent(ctx context.Context, client *openai.Client, userInput string,
 	var allFailures []string
 	
 	for attempt := 0; attempt < 2 && len(pendingMutations) > 0; attempt++ {
-		debugLogger.Printf("Mutation attempt %d with %d mutations", attempt+1, len(pendingMutations))
 		
 		successes, failures := ExecuteMutations(ctx, pendingMutations, mcpClient, debugLogger, world, actingNPCID)
 		allSuccesses = append(allSuccesses, successes...)
@@ -162,7 +151,6 @@ func ExecuteIntent(ctx context.Context, client *openai.Client, userInput string,
 			
 			retryResp, err := InterpretIntent(client, retryPrompt, world, gameHistory, mcpClient, debugLogger, actingNPCID)
 			if err != nil {
-				debugLogger.Printf("Retry mutation generation failed: %v", err)
 				break
 			}
 			pendingMutations = retryResp.Mutations
@@ -185,7 +173,6 @@ func ProcessPlayerAction(client *openai.Client, userInput string, world game.Wor
 		
 		executionResult, err := ExecuteIntent(ctx, client, userInput, world, gameHistory, mcpClient, debugLogger, npcID)
 		if err != nil {
-			debugLogger.Printf("Mutation generation/execution failed: %v", err)
 			executionResult = &ExecutionResult{
 				Successes: []string{},
 				Failures:  []string{fmt.Sprintf("Failed to process action: %v", err)},
@@ -195,7 +182,6 @@ func ProcessPlayerAction(client *openai.Client, userInput string, world game.Wor
 		mcpWorld, err := mcpClient.GetWorldState(ctx)
 		var newWorld game.WorldState
 		if err != nil {
-			debugLogger.Printf("Failed to get updated world state: %v", err)
 			newWorld = world
 		} else {
 			newWorld = mcp.MCPToGameWorldState(mcpWorld)
@@ -203,7 +189,6 @@ func ProcessPlayerAction(client *openai.Client, userInput string, world game.Wor
 		
 		sensoryEvents, err := sensory.GenerateSensoryEvents(client, userInput, executionResult.Successes, newWorld, debugLogger != nil, npcID)
 		if err != nil {
-			debugLogger.Printf("Failed to generate sensory events: %v", err)
 			sensoryEvents = &sensory.SensoryEventResponse{AuditoryEvents: []sensory.SensoryEvent{}}
 		}
 		
