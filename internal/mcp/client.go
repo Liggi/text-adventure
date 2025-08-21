@@ -54,6 +54,9 @@ type NPC struct {
 	Inventory     []string `json:"inventory"`
 	RecentThoughts []string `json:"recent_thoughts"`
 	RecentActions []string `json:"recent_actions"`
+	Personality   string   `json:"personality"`
+	Backstory     string   `json:"backstory"`
+	CoreMemories  []string `json:"core_memories"`
 }
 
 func NewWorldStateClient(debug bool) (*WorldStateClient, error) {
@@ -318,4 +321,40 @@ func (w *WorldStateClient) ListTools(ctx context.Context) (string, error) {
 	}
 	
 	return strings.Join(toolDescriptions, "\n"), nil
+}
+
+func (w *WorldStateClient) ConfigureNPC(ctx context.Context, npcID, personality, backstory, coreMemories string) (string, error) {
+	args := map[string]interface{}{
+		"npc_id": npcID,
+	}
+	
+	if personality != "" {
+		args["personality"] = personality
+	}
+	if backstory != "" {
+		args["backstory"] = backstory
+	}
+	if coreMemories != "" {
+		args["core_memories"] = coreMemories
+	}
+	
+	params := &mcp.CallToolParams{
+		Name:      "configure_npc",
+		Arguments: args,
+	}
+
+	result, err := w.session.CallTool(ctx, params)
+	if err != nil {
+		return "", fmt.Errorf("failed to configure NPC: %w", err)
+	}
+
+	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
+	if w.debug {
+		log.Printf("Configure NPC result: %s", response)
+	}
+
+	return response, nil
 }

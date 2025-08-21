@@ -78,13 +78,18 @@ func GenerateNPCThoughts(llmService *llm.Service, npcID string, world game.World
 		worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 		
 		var recentThoughts, recentActions []string
+		var personality, backstory string
+		var coreMemories []string
 		if npc, exists := world.NPCs[npcID]; exists {
 			recentThoughts = npc.RecentThoughts
 			recentActions = npc.RecentActions
+			personality = npc.Personality
+			backstory = npc.Backstory
+			coreMemories = npc.CoreMemories
 		}
 		
 		req := llm.TextCompletionRequest{
-			SystemPrompt: buildThoughtsPrompt(npcID, recentThoughts, recentActions),
+			SystemPrompt: buildThoughtsPrompt(npcID, recentThoughts, recentActions, personality, backstory, coreMemories),
 			UserPrompt:   worldContext,
 			MaxTokens:    150,
 		}
@@ -117,12 +122,15 @@ func GenerateNPCAction(llmService *llm.Service, npcID string, npcThoughts string
 	worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 	
 	var recentActions []string
+	var personality, backstory string
 	if npc, exists := world.NPCs[npcID]; exists {
 		recentActions = npc.RecentActions
+		personality = npc.Personality
+		backstory = npc.Backstory
 	}
 	
 	req := llm.TextCompletionRequest{
-		SystemPrompt: buildActionPrompt(npcID, npcThoughts, recentActions),
+		SystemPrompt: buildActionPrompt(npcID, npcThoughts, recentActions, personality, backstory),
 		UserPrompt:   worldContext,
 		MaxTokens:    100,
 	}

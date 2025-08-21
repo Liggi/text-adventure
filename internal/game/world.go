@@ -20,6 +20,9 @@ type NPCInfo struct {
 	Inventory     []string
 	RecentThoughts []string
 	RecentActions []string
+	Personality   string
+	Backstory     string
+	CoreMemories  []string
 }
 
 func NewDefaultWorldState() WorldState {

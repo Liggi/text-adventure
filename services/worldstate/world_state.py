@@ -118,7 +118,14 @@ DEFAULT_WORLD_STATE = {
             "debug_color": "35",
             "inventory": [],
             "recent_thoughts": [],
-            "recent_actions": []
+            "recent_actions": [],
+            "personality": "cautious and knowledgeable",
+            "backstory": "A librarian and keeper of this old manor's secrets, Elena has been here for years cataloging its mysteries.",
+            "core_memories": [
+                "The manor holds dangerous secrets that must be protected from the unprepared",
+                "Trust must be earned slowly - too many have sought the forbidden knowledge",
+                "The locked doors exist for good reason"
+            ]
         }
     }
 }
@@ -417,6 +424,47 @@ async def update_npc_memory(npc_id: str, thought: str = "", action: str = "") ->
         return f"Updated {npc_id} memory - {', '.join(updates)}"
     else:
         return f"No updates provided for {npc_id}"
+
+
+@mcp.tool()
+async def configure_npc(npc_id: str, personality: str = "", backstory: str = "", core_memories: str = "") -> str:
+    """Configure an NPC's personality, backstory, and core memories.
+    
+    Args:
+        npc_id: The NPC ID to configure (e.g., "elena")
+        personality: Brief personality description (e.g., "cautious scholar")
+        backstory: Background story explaining who they are
+        core_memories: Comma-separated list of important memories
+        
+    Returns:
+        Success message or error description
+    """
+    state = load_world_state()
+    
+    if npc_id not in state["npcs"]:
+        return f"Error: NPC '{npc_id}' does not exist"
+    
+    npc = state["npcs"][npc_id]
+    updates = []
+    
+    if personality:
+        npc["personality"] = personality
+        updates.append("personality")
+    
+    if backstory:
+        npc["backstory"] = backstory
+        updates.append("backstory")
+    
+    if core_memories:
+        memory_list = [mem.strip() for mem in core_memories.split(",") if mem.strip()]
+        npc["core_memories"] = memory_list
+        updates.append("core memories")
+    
+    if updates:
+        save_world_state(state)
+        return f"Updated {npc_id}: {', '.join(updates)}"
+    else:
+        return f"No configuration changes provided for {npc_id}"
 
 
 if __name__ == "__main__":

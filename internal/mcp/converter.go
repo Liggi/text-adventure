@@ -22,6 +22,9 @@ func MCPToGameWorldState(mcpWorld *WorldState) game.WorldState {
 			Inventory:      mcpNPC.Inventory,
 			RecentThoughts: mcpNPC.RecentThoughts,
 			RecentActions:  mcpNPC.RecentActions,
+			Personality:    mcpNPC.Personality,
+			Backstory:      mcpNPC.Backstory,
+			CoreMemories:   mcpNPC.CoreMemories,
 		}
 	}
 	

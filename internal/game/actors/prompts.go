@@ -2,7 +2,7 @@ package actors
 
 import "fmt"
 
-func buildThoughtsPrompt(npcID string, recentThoughts []string, recentActions []string) string {
+func buildThoughtsPrompt(npcID string, recentThoughts []string, recentActions []string, personality string, backstory string, coreMemories []string) string {
 	memoryContext := ""
 	if len(recentThoughts) > 0 || len(recentActions) > 0 {
 		memoryContext = "\n\nYour recent memory:"
@@ -15,36 +15,63 @@ func buildThoughtsPrompt(npcID string, recentThoughts []string, recentActions []
 		memoryContext += "\nDon't repeat the same thoughts unless something has changed. Build on your previous thinking."
 	}
 
+	personalityContext := ""
+	if personality != "" {
+		personalityContext = fmt.Sprintf("\n- Personality: %s", personality)
+	}
+	
+	backstoryContext := ""
+	if backstory != "" {
+		backstoryContext = fmt.Sprintf("\n\nWho you are: %s", backstory)
+	}
+	
+	coreMemoryContext := ""
+	if len(coreMemories) > 0 {
+		coreMemoryContext = "\n\nCore memories that shape your thinking:"
+		for _, memory := range coreMemories {
+			coreMemoryContext += fmt.Sprintf("\n- %s", memory)
+		}
+	}
+
 	return fmt.Sprintf(`You are %s, an NPC in a text adventure game. Generate realistic internal thoughts - the kind that actually run through someone's head.
 
 Your character:
-- Name: %s  
-- You are curious and intelligent
+- Name: %s%s
 - You think like a real person - brief, practical thoughts, not flowery descriptions
-- React to immediate surroundings and events
+- React to immediate surroundings and events%s%s
 
 Think like an actual human mind:
 - Use simple, direct thoughts: "Should I check that out?" not "The crystal orb hums faintly—why now"
 - Be practical, not poetic
 - Notice connections naturally: if you hear footsteps then see someone, you'd casually connect them
 - Think ahead: "Maybe I should..." or "I wonder if..."
-- Base thoughts on what you can see, hear, remember, and what's been happening around you%s
+- Base thoughts on what you can see, hear, remember, and what's been happening around you
+- Let your personality and background influence your reactions%s
 
-Return only realistic internal thoughts, nothing else. Keep it to one line.`, npcID, npcID, memoryContext)
+Return only realistic internal thoughts, nothing else. Keep it to one line.`, npcID, npcID, personalityContext, backstoryContext, coreMemoryContext, memoryContext)
 }
 
-func buildActionPrompt(npcID string, npcThoughts string, recentActions []string) string {
+func buildActionPrompt(npcID string, npcThoughts string, recentActions []string, personality string, backstory string) string {
 	memoryContext := ""
 	if len(recentActions) > 0 {
 		memoryContext = fmt.Sprintf("\n\nYour recent actions: %v\nDon't repeat the same action unless something has changed.", recentActions)
+	}
+
+	personalityContext := ""
+	if personality != "" {
+		personalityContext = fmt.Sprintf("- Personality: %s\n", personality)
+	}
+	
+	backstoryContext := ""
+	if backstory != "" {
+		backstoryContext = fmt.Sprintf("- Background: %s\n", backstory)
 	}
 
 	return fmt.Sprintf(`You are %s, an NPC in a text adventure game. Based on your thoughts and the current situation, decide what action to take.
 
 Your character:
 - Name: %s
-- You are curious, intelligent, and responsive to your environment
-- You act naturally based on what you've noticed and what you're thinking
+%s%s- You act naturally based on what you've noticed and what you're thinking
 - You can move between rooms, pick up items, talk to people, or interact with objects
 - Take one action per turn that makes sense given your thoughts and the situation
 
@@ -57,5 +84,5 @@ Based on your thoughts and the world state, what do you want to do? You can:
 - Look around or examine something
 - Do nothing (return empty string)
 
-Return only a brief action statement, or an empty string if you don't want to act.`, npcID, npcID, npcThoughts, memoryContext)
+Return only a brief action statement, or an empty string if you don't want to act.`, npcID, npcID, personalityContext, backstoryContext, npcThoughts, memoryContext)
 }
