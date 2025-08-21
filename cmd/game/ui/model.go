@@ -6,12 +6,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sashabaranov/go-openai"
 	
+	"textadventure/internal/debug"
 	"textadventure/internal/game"
+	"textadventure/internal/game/director"
 	"textadventure/internal/game/sensory"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"
 )
 
+type GameLoggers struct {
+	Debug      *debug.Logger
+	Completion *logging.CompletionLogger
+}
 
 type TurnPhase int
 
@@ -29,7 +35,8 @@ type Model struct {
 	height                  int
 	client                  *openai.Client
 	mcpClient               *mcp.WorldStateClient
-	debug                   bool
+	loggers                 GameLoggers
+	director                *director.Director
 	loading                 bool
 	streaming               bool
 	currentResponse         string
@@ -44,12 +51,12 @@ type Model struct {
 
 func NewModel(
 	client *openai.Client,
+	mcpClient *mcp.WorldStateClient,
+	loggers GameLoggers,
 	world game.WorldState,
-	logger *logging.CompletionLogger,
-	debug bool,
 ) Model {
 	messages := []string{}
-	if debug {
+	if loggers.Debug.IsEnabled() {
 		messages = append(messages, "[DEBUG] MCP integration active - world state loaded from server")
 		messages = append(messages, fmt.Sprintf("[DEBUG] Player location: %s, Inventory: %v", world.Location, world.Inventory))
 		messages = append(messages, "[DEBUG] Debug commands: /worldstate, /help")
@@ -61,19 +68,17 @@ func NewModel(
 		input:                   "",
 		cursor:                  0,
 		client:                  client,
-		debug:                   debug,
+		mcpClient:               mcpClient,
+		loggers:                 loggers,
+		director:                director.NewDirector(client, mcpClient, loggers.Debug),
 		world:                   world,
 		gameHistory:             []string{},
-		logger:                  logger,
 		turnPhase:               PlayerTurn,
 		npcTurnComplete:         false,
 		accumulatedSensoryEvents: []sensory.SensoryEvent{},
 	}
 }
 
-func (m *Model) SetMCPClient(client *mcp.WorldStateClient) {
-	m.mcpClient = client
-}
 
 func (m Model) Init() tea.Cmd {
 	return initialLookAroundCmd()

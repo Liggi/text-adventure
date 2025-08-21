@@ -54,8 +54,11 @@ func createApp() (ui.Model, error) {
 	
 	debugLogger.Printf("Game world converted: player at %s, inventory: %v", world.Location, world.Inventory)
 	
-	model := ui.NewModel(client, world, logger, debugMode)
-	model.SetMCPClient(mcpClient)
+	loggers := ui.GameLoggers{
+		Debug:      debugLogger,
+		Completion: logger,
+	}
+	model := ui.NewModel(client, mcpClient, loggers, world)
 	
 	return model, nil
 }

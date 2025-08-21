@@ -4,17 +4,84 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sashabaranov/go-openai"
 
+	"textadventure/internal/debug"
 	"textadventure/internal/game"
 	"textadventure/internal/game/sensory"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"
 )
+
+type Director struct {
+	client       *openai.Client
+	mcpClient    *mcp.WorldStateClient
+	debugLogger  *debug.Logger
+}
+
+func NewDirector(client *openai.Client, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger) *Director {
+	return &Director{
+		client:      client,
+		mcpClient:   mcpClient,
+		debugLogger: debugLogger,
+	}
+}
+
+type IntentBuilder struct {
+	director    *Director
+	intent      string
+	world       *game.WorldState
+	history     []string
+	actorID     string
+	logger      *logging.CompletionLogger
+}
+
+func (d *Director) ProcessIntent(intent string) *IntentBuilder {
+	return &IntentBuilder{
+		director: d,
+		intent:   intent,
+	}
+}
+
+func (b *IntentBuilder) WithWorld(world game.WorldState) *IntentBuilder {
+	b.world = &world
+	return b
+}
+
+func (b *IntentBuilder) WithHistory(history []string) *IntentBuilder {
+	b.history = history
+	return b
+}
+
+func (b *IntentBuilder) WithActor(actorID string) *IntentBuilder {
+	b.actorID = actorID
+	return b
+}
+
+func (b *IntentBuilder) WithLogger(logger *logging.CompletionLogger) *IntentBuilder {
+	b.logger = logger
+	return b
+}
+
+func (b *IntentBuilder) Execute() tea.Cmd {
+	if b.world == nil {
+		panic("world state required - call WithWorld() before Execute()")
+	}
+	
+	return StartTwoStepLLMFlow(
+		b.director.client,
+		b.intent,
+		*b.world,
+		b.history,
+		b.logger,
+		b.director.mcpClient,
+		b.director.debugLogger,
+		b.actorID,
+	)
+}
 
 // MutationRequest represents a single world mutation to be executed
 type MutationRequest struct {
@@ -38,8 +105,7 @@ type MutationsGeneratedMsg struct {
 	ActingNPCID   string
 }
 
-// GenerateMutations generates world mutations based on user input using the LLM Director
-func GenerateMutations(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool, actingNPCID string) (*MutationResponse, error) {
+func GenerateMutations(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger, actingNPCID string) (*MutationResponse, error) {
 	ctx := context.Background()
 	
 	toolDescriptions, err := mcpClient.ListTools(ctx)
@@ -100,91 +166,68 @@ If no mutations needed, return empty mutations array.`, toolDescriptions, buildW
 		},
 	}
 
-	if debug {
-		log.Printf("=== MUTATION GENERATION START ===")
-		log.Printf("Action: %q", userInput)
-		log.Printf("System prompt length: %d chars", len(systemPrompt))
-	}
+	debugLogger.Printf("=== MUTATION GENERATION START ===")
+	debugLogger.Printf("Action: %q", userInput)
+	debugLogger.Printf("System prompt length: %d chars", len(systemPrompt))
 
 	resp, err := client.CreateChatCompletion(context.Background(), req)
 	if err != nil {
-		if debug {
-			log.Printf("Mutation generation API error: %v", err)
-		}
+		debugLogger.Printf("Mutation generation API error: %v", err)
 		return nil, fmt.Errorf("mutation generation failed: %w", err)
 	}
 
-	if debug {
-		log.Printf("API Response - Choices length: %d", len(resp.Choices))
-		if len(resp.Choices) > 0 {
-			log.Printf("Response choice 0 - Content: %q", resp.Choices[0].Message.Content)
-		}
+	debugLogger.Printf("API Response - Choices length: %d", len(resp.Choices))
+	if len(resp.Choices) > 0 {
+		debugLogger.Printf("Response choice 0 - Content: %q", resp.Choices[0].Message.Content)
 	}
 
 	var mutationResp MutationResponse
 	content := resp.Choices[0].Message.Content
 	
 	if err := json.Unmarshal([]byte(content), &mutationResp); err != nil {
-		if debug {
-			log.Printf("JSON unmarshal failed: %v", err)
-			log.Printf("Content was: %q", content)
-		}
+		debugLogger.Printf("JSON unmarshal failed: %v", err)
+		debugLogger.Printf("Content was: %q", content)
 		return &MutationResponse{Mutations: []MutationRequest{}}, nil
 	}
 
-	if debug {
-		log.Printf("Generated %d mutations", len(mutationResp.Mutations))
-		for i, mutation := range mutationResp.Mutations {
-			log.Printf("  Mutation %d: %s with args %v", i, mutation.Tool, mutation.Args)
-		}
-		log.Printf("=== MUTATION GENERATION END ===")
+	debugLogger.Printf("Generated %d mutations", len(mutationResp.Mutations))
+	for i, mutation := range mutationResp.Mutations {
+		debugLogger.Printf("  Mutation %d: %s with args %v", i, mutation.Tool, mutation.Args)
 	}
+	debugLogger.Printf("=== MUTATION GENERATION END ===")
 
 	return &mutationResp, nil
 }
 
-// ExecuteMutations executes a list of mutations using the MCP client
-func ExecuteMutations(ctx context.Context, mutations []MutationRequest, mcpClient *mcp.WorldStateClient, debug bool, world game.WorldState, actingNPCID string) ([]string, []string) {
+func ExecuteMutations(ctx context.Context, mutations []MutationRequest, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger, world game.WorldState, actingNPCID string) ([]string, []string) {
 	var successes []string
 	var failures []string
 	
 	for _, mutation := range mutations {
-		if debug {
-			log.Printf("Executing mutation: %s with args: %v", mutation.Tool, mutation.Args)
-		}
+		debugLogger.Printf("Executing mutation: %s with args: %v", mutation.Tool, mutation.Args)
 		
 		switch mutation.Tool {
 		case "get_world_state":
-			if debug {
-				log.Printf("Getting world state...")
-			}
+			debugLogger.Printf("Getting world state...")
 			_, err := mcpClient.GetWorldState(ctx)
 			if err != nil {
 				failure := fmt.Sprintf("Failed to get world state: %v", err)
 				failures = append(failures, failure)
-				if debug {
-					log.Printf("ERROR: %s", failure)
-				}
+				debugLogger.Printf("ERROR: %s", failure)
 			} else {
 				success := "Retrieved world state"
 				successes = append(successes, success)
-				if debug {
-					log.Printf("SUCCESS: %s", success)
-				}
+				debugLogger.Printf("SUCCESS: %s", success)
 			}
 			
 		case "move_player":
 			if location, ok := mutation.Args["location"].(string); ok {
-				if debug {
-					log.Printf("Moving player to: %s", location)
-				}
+				debugLogger.Printf("Moving player to: %s", location)
 				_, err := mcpClient.MovePlayer(ctx, location)
 				if err != nil {
 					failure := fmt.Sprintf("Failed to move to %s: %v", location, err)
 					failures = append(failures, failure)
-					if debug {
-						log.Printf("ERROR: %s", failure)
-					}
+					debugLogger.Printf("ERROR: %s", failure)
 				} else {
 					var successMsg string
 					if actingNPCID != "" {
@@ -193,16 +236,12 @@ func ExecuteMutations(ctx context.Context, mutations []MutationRequest, mcpClien
 						successMsg = fmt.Sprintf("Moved to %s", location)
 					}
 					successes = append(successes, successMsg)
-					if debug {
-						log.Printf("SUCCESS: %s", successMsg)
-					}
+					debugLogger.Printf("SUCCESS: %s", successMsg)
 				}
 			} else {
 				failure := "move_player requires 'location' parameter"
 				failures = append(failures, failure)
-				if debug {
-					log.Printf("ERROR: %s", failure)
-				}
+				debugLogger.Printf("ERROR: %s", failure)
 			}
 			
 		case "transfer_item":
@@ -211,83 +250,59 @@ func ExecuteMutations(ctx context.Context, mutations []MutationRequest, mcpClien
 			toLoc, hasTo := mutation.Args["to_location"].(string)
 			
 			if hasItem && hasFrom && hasTo {
-				if debug {
-					log.Printf("Transferring %s from %s to %s", item, fromLoc, toLoc)
-				}
+				debugLogger.Printf("Transferring %s from %s to %s", item, fromLoc, toLoc)
 				_, err := mcpClient.TransferItem(ctx, item, fromLoc, toLoc)
 				if err != nil {
 					failure := fmt.Sprintf("Failed to transfer %s from %s to %s: %v", item, fromLoc, toLoc, err)
 					failures = append(failures, failure)
-					if debug {
-						log.Printf("ERROR: %s", failure)
-					}
+					debugLogger.Printf("ERROR: %s", failure)
 				} else {
 					success := fmt.Sprintf("Transferred %s from %s to %s", item, fromLoc, toLoc)
 					successes = append(successes, success)
-					if debug {
-						log.Printf("SUCCESS: %s", success)
-					}
+					debugLogger.Printf("SUCCESS: %s", success)
 				}
 			} else {
 				failure := "transfer_item requires 'item', 'from_location', and 'to_location' parameters"
 				failures = append(failures, failure)
-				if debug {
-					log.Printf("ERROR: %s", failure)
-				}
+				debugLogger.Printf("ERROR: %s", failure)
 			}
 			
 		case "add_to_inventory":
 			if item, ok := mutation.Args["item"].(string); ok {
-				if debug {
-					log.Printf("Adding %s to inventory", item)
-				}
+				debugLogger.Printf("Adding %s to inventory", item)
 				_, err := mcpClient.AddToInventory(ctx, item)
 				if err != nil {
 					failure := fmt.Sprintf("Failed to add %s to inventory: %v", item, err)
 					failures = append(failures, failure)
-					if debug {
-						log.Printf("ERROR: %s", failure)
-					}
+					debugLogger.Printf("ERROR: %s", failure)
 				} else {
 					success := fmt.Sprintf("Added %s to inventory", item)
 					successes = append(successes, success)
-					if debug {
-						log.Printf("SUCCESS: %s", success)
-					}
+					debugLogger.Printf("SUCCESS: %s", success)
 				}
 			} else {
 				failure := "add_to_inventory requires 'item' parameter"
 				failures = append(failures, failure)
-				if debug {
-					log.Printf("ERROR: %s", failure)
-				}
+				debugLogger.Printf("ERROR: %s", failure)
 			}
 			
 		case "remove_from_inventory":
 			if item, ok := mutation.Args["item"].(string); ok {
-				if debug {
-					log.Printf("Removing %s from inventory", item)
-				}
+				debugLogger.Printf("Removing %s from inventory", item)
 				_, err := mcpClient.RemoveFromInventory(ctx, item)
 				if err != nil {
 					failure := fmt.Sprintf("Failed to remove %s from inventory: %v", item, err)
 					failures = append(failures, failure)
-					if debug {
-						log.Printf("ERROR: %s", failure)
-					}
+					debugLogger.Printf("ERROR: %s", failure)
 				} else {
 					success := fmt.Sprintf("Removed %s from inventory", item)
 					successes = append(successes, success)
-					if debug {
-						log.Printf("SUCCESS: %s", success)
-					}
+					debugLogger.Printf("SUCCESS: %s", success)
 				}
 			} else {
 				failure := "remove_from_inventory requires 'item' parameter"
 				failures = append(failures, failure)
-				if debug {
-					log.Printf("ERROR: %s", failure)
-				}
+				debugLogger.Printf("ERROR: %s", failure)
 			}
 			
 		case "unlock_door":
@@ -295,50 +310,37 @@ func ExecuteMutations(ctx context.Context, mutations []MutationRequest, mcpClien
 			toLoc, hasTo := mutation.Args["to_location"].(string)
 			
 			if hasFrom && hasTo {
-				if debug {
-					log.Printf("Unlocking door from %s to %s", fromLoc, toLoc)
-				}
+				debugLogger.Printf("Unlocking door from %s to %s", fromLoc, toLoc)
 				_, err := mcpClient.UnlockDoor(ctx, fromLoc, toLoc, "")
 				if err != nil {
 					failure := fmt.Sprintf("Failed to unlock door from %s to %s: %v", fromLoc, toLoc, err)
 					failures = append(failures, failure)
-					if debug {
-						log.Printf("ERROR: %s", failure)
-					}
+					debugLogger.Printf("ERROR: %s", failure)
 				} else {
 					success := fmt.Sprintf("Unlocked door from %s to %s", fromLoc, toLoc)
 					successes = append(successes, success)
-					if debug {
-						log.Printf("SUCCESS: %s", success)
-					}
+					debugLogger.Printf("SUCCESS: %s", success)
 				}
 			} else {
 				failure := "unlock_door requires 'from_location' and 'to_location' parameters"
 				failures = append(failures, failure)
-				if debug {
-					log.Printf("ERROR: %s", failure)
-				}
+				debugLogger.Printf("ERROR: %s", failure)
 			}
 			
 		default:
 			failure := fmt.Sprintf("Unknown tool: %s", mutation.Tool)
 			failures = append(failures, failure)
-			if debug {
-				log.Printf("ERROR: %s", failure)
-			}
+			debugLogger.Printf("ERROR: %s", failure)
 		}
 	}
 	
-	if debug {
-		log.Printf("Mutation execution complete: %d successes, %d failures", len(successes), len(failures))
-	}
+	debugLogger.Printf("Mutation execution complete: %d successes, %d failures", len(successes), len(failures))
 	
 	return successes, failures
 }
 
-// generateAndExecuteMutationsWithRetries generates mutations and executes them, with retry logic
-func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool, actingNPCID string) ([]string, []string, error) {
-	mutationResp, err := GenerateMutations(client, userInput, world, gameHistory, mcpClient, debug, actingNPCID)
+func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger, actingNPCID string) ([]string, []string, error) {
+	mutationResp, err := GenerateMutations(client, userInput, world, gameHistory, mcpClient, debugLogger, actingNPCID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate mutations: %w", err)
 	}
@@ -352,11 +354,9 @@ func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.
 	var allFailures []string
 	
 	for attempt := 0; attempt < 2 && len(pendingMutations) > 0; attempt++ {
-		if debug {
-			log.Printf("Mutation attempt %d with %d mutations", attempt+1, len(pendingMutations))
-		}
+		debugLogger.Printf("Mutation attempt %d with %d mutations", attempt+1, len(pendingMutations))
 		
-		successes, failures := ExecuteMutations(ctx, pendingMutations, mcpClient, debug, world, actingNPCID)
+		successes, failures := ExecuteMutations(ctx, pendingMutations, mcpClient, debugLogger, world, actingNPCID)
 		allSuccesses = append(allSuccesses, successes...)
 		
 		if len(failures) == 0 {
@@ -369,11 +369,9 @@ func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.
 			retryPrompt := fmt.Sprintf("Previous attempt failed with errors: %s. Please try a different approach for: %s", 
 				strings.Join(failures, "; "), userInput)
 			
-			retryResp, err := GenerateMutations(client, retryPrompt, world, gameHistory, mcpClient, debug, actingNPCID)
+			retryResp, err := GenerateMutations(client, retryPrompt, world, gameHistory, mcpClient, debugLogger, actingNPCID)
 			if err != nil {
-				if debug {
-					log.Printf("Retry mutation generation failed: %v", err)
-				}
+				debugLogger.Printf("Retry mutation generation failed: %v", err)
 				break
 			}
 			pendingMutations = retryResp.Mutations
@@ -385,8 +383,7 @@ func generateAndExecuteMutationsWithRetries(ctx context.Context, client *openai.
 	return allSuccesses, allFailures, nil
 }
 
-// StartTwoStepLLMFlow orchestrates the two-step flow: generate mutations → execute → create sensory events → narrate
-func StartTwoStepLLMFlow(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, mcpClient *mcp.WorldStateClient, debug bool, actingNPCID ...string) tea.Cmd {
+func StartTwoStepLLMFlow(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger, actingNPCID ...string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		
@@ -395,11 +392,9 @@ func StartTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 			npcID = actingNPCID[0]
 		}
 		
-		successes, failures, err := generateAndExecuteMutationsWithRetries(ctx, client, userInput, world, gameHistory, mcpClient, debug, npcID)
+		successes, failures, err := generateAndExecuteMutationsWithRetries(ctx, client, userInput, world, gameHistory, mcpClient, debugLogger, npcID)
 		if err != nil {
-			if debug {
-				log.Printf("Mutation generation/execution failed: %v", err)
-			}
+			debugLogger.Printf("Mutation generation/execution failed: %v", err)
 			successes = []string{}
 			failures = []string{fmt.Sprintf("Failed to process action: %v", err)}
 		}
@@ -407,24 +402,20 @@ func StartTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 		mcpWorld, err := mcpClient.GetWorldState(ctx)
 		var newWorld game.WorldState
 		if err != nil {
-			if debug {
-				log.Printf("Failed to get updated world state: %v", err)
-			}
+			debugLogger.Printf("Failed to get updated world state: %v", err)
 			newWorld = world
 		} else {
 			newWorld = mcp.MCPToGameWorldState(mcpWorld)
 		}
 		
-		sensoryEvents, err := sensory.GenerateSensoryEvents(client, userInput, successes, newWorld, debug, npcID)
+		sensoryEvents, err := sensory.GenerateSensoryEvents(client, userInput, successes, newWorld, debugLogger != nil, npcID)
 		if err != nil {
-			if debug {
-				log.Printf("Failed to generate sensory events: %v", err)
-			}
+			debugLogger.Printf("Failed to generate sensory events: %v", err)
 			sensoryEvents = &sensory.SensoryEventResponse{AuditoryEvents: []sensory.SensoryEvent{}}
 		}
 		
 		var allMessages []string
-		if debug {
+		if debugLogger != nil {
 			allMessages = append(allMessages, "[MUTATIONS]")
 			if len(successes) > 0 {
 				allMessages = append(allMessages, successes...)
@@ -446,7 +437,7 @@ func StartTwoStepLLMFlow(client *openai.Client, userInput string, world game.Wor
 			SensoryEvents: sensoryEvents,
 			NewWorld:      newWorld,
 			UserInput:     userInput,
-			Debug:         debug,
+			Debug:         debugLogger != nil,
 			ActingNPCID:   npcID,
 		}
 	}

@@ -32,3 +32,7 @@ func (d *Logger) Println(args ...interface{}) {
 		log.Println(args...)
 	}
 }
+
+func (d *Logger) IsEnabled() bool {
+	return d.enabled
+}
