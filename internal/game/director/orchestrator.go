@@ -44,58 +44,10 @@ func InterpretIntent(client *openai.Client, userInput string, world game.WorldSt
 		return nil, fmt.Errorf("failed to get tool descriptions from MCP server: %w", err)
 	}
 
-	var actionLabel string
-	if actingNPCID != "" {
-		actionLabel = fmt.Sprintf("NPC %s ACTION", strings.ToUpper(actingNPCID))
-	} else {
-		actionLabel = "Player action"
-	}
+	actionLabel := getActionLabel(actingNPCID)
+	systemPrompt := buildSystemPrompt(toolDescriptions, world, gameHistory, actionLabel, actingNPCID)
 
-	systemPrompt := fmt.Sprintf(`You are the Director of a text adventure game. Your role is to understand player intent and generate the specific world mutations needed to make it happen.
-
-%s
-
-WORLD STATE CONTEXT:
-%s
-
-RULES:
-- Parse the %s and decide what world mutations are needed
-- Generate JSON array of mutations using the available tools
-- Be conservative - only generate mutations that directly relate to the stated action
-- For movement: use move_player tool
-- For picking up items: use transfer_item to move from location to player, then add_to_inventory
-- For dropping items: use remove_from_inventory, then transfer_item to move to current location
-- For examining/looking: usually no mutations needed
-- NPCs can only affect items at their current location or their own movement
-
-Return JSON format:
-{
-  "mutations": [
-    {"tool": "move_player", "args": {"location": "kitchen"}},
-    {"tool": "transfer_item", "args": {"item": "key", "from_location": "foyer", "to_location": "player"}}
-  ]
-}
-
-If no mutations needed, return empty mutations array.`, toolDescriptions, buildWorldContext(world, gameHistory, actingNPCID), actionLabel)
-
-	req := openai.ChatCompletionRequest{
-		Model: "gpt-5-2025-08-07",
-		Messages: []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: systemPrompt,
-			},
-			{
-				Role:    openai.ChatMessageRoleUser,
-				Content: fmt.Sprintf("%s: %s", actionLabel, userInput),
-			},
-		},
-		MaxCompletionTokens: 400,
-		ReasoningEffort:     "minimal",
-		ResponseFormat: &openai.ChatCompletionResponseFormat{
-			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
-		},
-	}
+	req := buildCompletionRequest(systemPrompt, actionLabel, userInput)
 
 	debugLogger.Printf("Processing action: %q", userInput)
 
@@ -130,36 +82,7 @@ func ExecuteIntent(ctx context.Context, client *openai.Client, userInput string,
 		return &ExecutionResult{Successes: []string{}, Failures: []string{}}, nil
 	}
 	
-	pendingMutations := actionPlan.Mutations
-	var allSuccesses []string
-	var allFailures []string
-	
-	for attempt := 0; attempt < 2 && len(pendingMutations) > 0; attempt++ {
-		
-		successes, failures := ExecuteMutations(ctx, pendingMutations, mcpClient, debugLogger, world, actingNPCID)
-		allSuccesses = append(allSuccesses, successes...)
-		
-		if len(failures) == 0 {
-			break
-		}
-		
-		allFailures = append(allFailures, failures...)
-		
-		if attempt == 0 && len(failures) > 0 {
-			retryPrompt := fmt.Sprintf("Previous attempt failed with errors: %s. Please try a different approach for: %s", 
-				strings.Join(failures, "; "), userInput)
-			
-			retryResp, err := InterpretIntent(client, retryPrompt, world, gameHistory, mcpClient, debugLogger, actingNPCID)
-			if err != nil {
-				break
-			}
-			pendingMutations = retryResp.Mutations
-		} else {
-			break
-		}
-	}
-	
-	return &ExecutionResult{Successes: allSuccesses, Failures: allFailures}, nil
+	return executeWithRetry(ctx, client, userInput, world, gameHistory, mcpClient, debugLogger, actingNPCID, actionPlan.Mutations)
 }
 
 func ProcessPlayerAction(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger, actingNPCID ...string) tea.Cmd {
@@ -260,4 +183,93 @@ func buildWorldContext(world game.WorldState, gameHistory []string, actingNPCID 
 	}
 	
 	return context.String()
+}
+
+func getActionLabel(actingNPCID string) string {
+	if actingNPCID != "" {
+		return fmt.Sprintf("NPC %s ACTION", strings.ToUpper(actingNPCID))
+	}
+	return "Player action"
+}
+
+func buildSystemPrompt(toolDescriptions string, world game.WorldState, gameHistory []string, actionLabel string, actingNPCID string) string {
+	return fmt.Sprintf(`You are the Director of a text adventure game. Your role is to understand player intent and generate the specific world mutations needed to make it happen.
+
+%s
+
+WORLD STATE CONTEXT:
+%s
+
+RULES:
+- Parse the %s and decide what world mutations are needed
+- Generate JSON array of mutations using the available tools
+- Be conservative - only generate mutations that directly relate to the stated action
+- For movement: use move_player tool
+- For picking up items: use transfer_item to move from location to player, then add_to_inventory
+- For dropping items: use remove_from_inventory, then transfer_item to move to current location
+- For examining/looking: usually no mutations needed
+- NPCs can only affect items at their current location or their own movement
+
+Return JSON format:
+{
+  "mutations": [
+    {"tool": "move_player", "args": {"location": "kitchen"}},
+    {"tool": "transfer_item", "args": {"item": "key", "from_location": "foyer", "to_location": "player"}}
+  ]
+}
+
+If no mutations needed, return empty mutations array.`, toolDescriptions, buildWorldContext(world, gameHistory, actingNPCID), actionLabel)
+}
+
+func buildCompletionRequest(systemPrompt, actionLabel, userInput string) openai.ChatCompletionRequest {
+	return openai.ChatCompletionRequest{
+		Model: "gpt-5-2025-08-07",
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemPrompt,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: fmt.Sprintf("%s: %s", actionLabel, userInput),
+			},
+		},
+		MaxCompletionTokens: 400,
+		ReasoningEffort:     "minimal",
+		ResponseFormat: &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		},
+	}
+}
+
+func executeWithRetry(ctx context.Context, client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger, actingNPCID string, mutations []MutationRequest) (*ExecutionResult, error) {
+	pendingMutations := mutations
+	var allSuccesses []string
+	var allFailures []string
+	
+	for attempt := 0; attempt < 2 && len(pendingMutations) > 0; attempt++ {
+		successes, failures := ExecuteMutations(ctx, pendingMutations, mcpClient, debugLogger, world, actingNPCID)
+		allSuccesses = append(allSuccesses, successes...)
+		
+		if len(failures) == 0 {
+			break
+		}
+		
+		allFailures = append(allFailures, failures...)
+		
+		if attempt == 0 && len(failures) > 0 {
+			retryPrompt := fmt.Sprintf("Previous attempt failed with errors: %s. Please try a different approach for: %s", 
+				strings.Join(failures, "; "), userInput)
+			
+			retryResp, err := InterpretIntent(client, retryPrompt, world, gameHistory, mcpClient, debugLogger, actingNPCID)
+			if err != nil {
+				break
+			}
+			pendingMutations = retryResp.Mutations
+		} else {
+			break
+		}
+	}
+	
+	return &ExecutionResult{Successes: allSuccesses, Failures: allFailures}, nil
 }
