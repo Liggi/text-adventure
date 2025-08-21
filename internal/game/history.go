@@ -22,6 +22,10 @@ func (h *History) AddNarratorResponse(response string) {
 	h.add("Narrator: " + response)
 }
 
+func (h *History) AddNPCAction(npcID, action string) {
+	h.add(fmt.Sprintf("%s: %s", npcID, action))
+}
+
 func (h *History) AddError(err error) {
 	h.add("Error: " + err.Error())
 }

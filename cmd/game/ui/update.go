@@ -52,13 +52,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) handleInitialLook(msg initialLookAroundMsg) (tea.Model, tea.Cmd) {
 	if !m.loading && m.mcpClient != nil {
 		userInput := "look around"
-		m.gameHistory = append(m.gameHistory, "Player: "+userInput)
+		m.gameHistory.AddPlayerAction(userInput)
 		m.loading = true
 		m.animationFrame = 0
 		m.messages = append(m.messages, "LOADING_ANIMATION")
 		m.turnPhase = Narration
 		
-		return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory, m.loggers.Completion), animationTimer())
+		return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
 	}
 	return m, nil
 }
@@ -66,7 +66,7 @@ func (m Model) handleInitialLook(msg initialLookAroundMsg) (tea.Model, tea.Cmd) 
 func (m Model) handleNPCTurn(msg npcTurnMsg) (tea.Model, tea.Cmd) {
 	if !m.loading && m.turnPhase == NPCTurns && !m.npcTurnComplete {
 		m.npcTurnComplete = true
-		return m, actors.GenerateNPCTurn(m.client, "elena", m.world, m.gameHistory, m.loggers.Debug.IsEnabled(), msg.sensoryEvents)
+		return m, actors.GenerateNPCTurn(m.client, "elena", m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled(), msg.sensoryEvents)
 	}
 	return m, nil
 }
@@ -78,7 +78,7 @@ func (m Model) handleNarrationTurn(msg narrationTurnMsg) (tea.Model, tea.Cmd) {
 		m.messages = append(m.messages, "LOADING_ANIMATION")
 		
 		userInput := "narrate recent events"
-		return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory, m.loggers.Completion), animationTimer())
+		return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
 	}
 	return m, nil
 }
@@ -140,12 +140,12 @@ func (m Model) handleNPCAction(msg actors.NPCActionMsg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, "")
 		}
 		
-		m.gameHistory = append(m.gameHistory, fmt.Sprintf("%s: %s", msg.NPCID, msg.Action))
+		m.gameHistory.AddNPCAction(msg.NPCID, msg.Action)
 		m.loading = true
 		m.animationFrame = 0
 		m.messages = append(m.messages, "LOADING_ANIMATION")
 		
-		return m, tea.Batch(m.director.ProcessPlayerAction(msg.Action, m.world, m.gameHistory, m.loggers.Completion, msg.NPCID), animationTimer())
+		return m, tea.Batch(m.director.ProcessPlayerAction(msg.Action, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, msg.NPCID), animationTimer())
 	}
 	return m, nil
 }
@@ -190,10 +190,7 @@ func (m Model) handleStreamComplete(msg narration.StreamCompleteMsg) (tea.Model,
 		m.loading = false
 		
 		if len(m.messages) > 0 && m.currentResponse != "" {
-			m.gameHistory = append(m.gameHistory, "Narrator: "+m.currentResponse)
-			if len(m.gameHistory) > 6 {
-				m.gameHistory = m.gameHistory[len(m.gameHistory)-6:]
-			}
+			m.gameHistory.AddNarratorResponse(m.currentResponse)
 		}
 		
 		m.messages = append(m.messages, "")
@@ -213,17 +210,13 @@ func (m Model) handleStreamError(msg narration.StreamErrorMsg) (tea.Model, tea.C
 		if msg.Err != nil {
 			errorMsg := "Error: " + msg.Err.Error()
 			m.messages = append(m.messages, errorMsg)
-			m.gameHistory = append(m.gameHistory, "Error: "+msg.Err.Error())
+			m.gameHistory.AddError(msg.Err)
 		} else {
 			m.messages = append(m.messages, msg.Response)
-			m.gameHistory = append(m.gameHistory, "Narrator: "+msg.Response)
+			m.gameHistory.AddNarratorResponse(msg.Response)
 		}
 		m.messages = append(m.messages, "")
 		m.loading = false
-		
-		if len(m.gameHistory) > 6 {
-			m.gameHistory = m.gameHistory[len(m.gameHistory)-6:]
-		}
 	} else if m.streaming {
 		m.streaming = false
 		m.loading = false
@@ -274,7 +267,7 @@ func (m Model) handleMutationsGenerated(msg director.MutationsGeneratedMsg) (tea
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			
 			combinedEvents := &sensory.SensoryEventResponse{AuditoryEvents: m.accumulatedSensoryEvents}
-			return m, narration.StartLLMStream(m.client, msg.UserInput, m.world, m.gameHistory, m.loggers.Completion, m.loggers.Debug.IsEnabled(), msg.Successes, combinedEvents, msg.ActingNPCID)
+			return m, narration.StartLLMStream(m.client, msg.UserInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, m.loggers.Debug.IsEnabled(), msg.Successes, combinedEvents, msg.ActingNPCID)
 		} else {
 			m.loading = false
 			
@@ -286,7 +279,7 @@ func (m Model) handleMutationsGenerated(msg director.MutationsGeneratedMsg) (tea
 			case NPCTurns:
 				m.turnPhase = Narration
 				m.npcTurnComplete = false
-				return m, startNarrationCmd(m.world, m.gameHistory, m.loggers.Debug.IsEnabled())
+				return m, startNarrationCmd(m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled())
 			default:
 				return m, nil
 			}
@@ -330,13 +323,13 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			
 			m.messages = append(m.messages, "> "+userInput)
 			m.messages = append(m.messages, "")
-			m.gameHistory = append(m.gameHistory, "Player: "+userInput)
+			m.gameHistory.AddPlayerAction(userInput)
 			m.loading = true
 			m.animationFrame = 0
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			m.turnPhase = PlayerTurn
 			
-			return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory, m.loggers.Completion), animationTimer())
+			return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
 		}
 		return m, nil
 

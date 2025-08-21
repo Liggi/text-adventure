@@ -42,7 +42,7 @@ type Model struct {
 	currentResponse         string
 	animationFrame          int
 	world                   game.WorldState
-	gameHistory             []string
+	gameHistory             *game.History
 	logger                  *logging.CompletionLogger
 	turnPhase               TurnPhase
 	npcTurnComplete         bool
@@ -72,7 +72,7 @@ func NewModel(
 		loggers:                 loggers,
 		director:                director.NewDirector(client, mcpClient, loggers.Debug),
 		world:                   world,
-		gameHistory:             []string{},
+		gameHistory:             game.NewHistory(6),
 		turnPhase:               PlayerTurn,
 		npcTurnComplete:         false,
 		accumulatedSensoryEvents: []sensory.SensoryEvent{},
