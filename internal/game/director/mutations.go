@@ -40,13 +40,12 @@ type MutationsGeneratedMsg struct {
 
 // GenerateMutations generates world mutations based on user input using the LLM Director
 func GenerateMutations(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, mcpClient *mcp.WorldStateClient, debug bool, actingNPCID string) (*MutationResponse, error) {
-	toolDescriptions := `Available tools:
-- get_world_state: Get current world state
-- move_player: Move player to a different location {"location": "location_name"}
-- transfer_item: Move item between locations/inventories {"item": "item_name", "from_location": "source", "to_location": "destination"}
-- add_to_inventory: Add item to player inventory {"item": "item_name"}
-- remove_from_inventory: Remove item from player inventory {"item": "item_name"}
-- unlock_door: Unlock a door between locations {"from_location": "source", "to_location": "destination"}`
+	ctx := context.Background()
+	
+	toolDescriptions, err := mcpClient.ListTools(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tool descriptions from MCP server: %w", err)
+	}
 
 	var actionLabel string
 	if actingNPCID != "" {
