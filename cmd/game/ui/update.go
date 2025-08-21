@@ -267,7 +267,7 @@ func (m Model) handleMutationsGenerated(msg director.MutationsGeneratedMsg) (tea
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			
 			combinedEvents := &sensory.SensoryEventResponse{AuditoryEvents: m.accumulatedSensoryEvents}
-			return m, narration.StartLLMStream(m.client, msg.UserInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, m.loggers.Debug.IsEnabled(), msg.Successes, combinedEvents, msg.ActingNPCID)
+			return m, narration.StartLLMStream(m.llmService, msg.UserInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, m.loggers.Debug.IsEnabled(), msg.Successes, combinedEvents, msg.ActingNPCID)
 		} else {
 			m.loading = false
 			

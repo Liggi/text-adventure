@@ -3,10 +3,8 @@ package narration
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,6 +12,7 @@ import (
 
 	"textadventure/internal/game"
 	"textadventure/internal/game/sensory"
+	"textadventure/internal/llm"
 	"textadventure/internal/logging"
 )
 
@@ -50,7 +49,7 @@ type StreamCompleteMsg struct {
 }
 
 // StartLLMStream initiates a streaming narration response
-func StartLLMStream(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, mutationResults []string, sensoryEvents *sensory.SensoryEventResponse, actingNPCID ...string) tea.Cmd {
+func StartLLMStream(llmService *llm.Service, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, mutationResults []string, sensoryEvents *sensory.SensoryEventResponse, actingNPCID ...string) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
 			log.Printf("Starting LLM stream with input: %q", userInput)
@@ -58,51 +57,15 @@ func StartLLMStream(client *openai.Client, userInput string, world game.WorldSta
 		
 		startTime := time.Now()
 		worldContext := game.BuildWorldContext(world, gameHistory, actingNPCID...)
-		var mutationContext string
-		if len(mutationResults) > 0 {
-			mutationContext = "\n\nMUTATIONS THAT JUST OCCURRED:\n" + strings.Join(mutationResults, "\n") + "\n\nThe world state above reflects these changes. Narrate based on what actually happened."
-		}
-
-		var sensoryContext string
-		if sensoryEvents != nil && len(sensoryEvents.AuditoryEvents) > 0 {
-			sensoryContext = "\n\nSENSORY EVENTS THAT OCCURRED:\n"
-			for _, event := range sensoryEvents.AuditoryEvents {
-				sensoryContext += fmt.Sprintf("- %s (%s volume) at %s\n", event.Description, event.Volume, event.Location)
-			}
-			sensoryContext += "\nThese are the ONLY sounds/events that occurred. Do not invent additional sounds or sensory details."
-		}
-
-		systemPrompt := fmt.Sprintf(`You are the narrator for a text adventure game. You have complete knowledge of the world state.
-
-Your job: Respond to player actions with 2-4 sentence vivid narration that feels natural and immersive.
-
-Rules:
-- Stay consistent with the provided world state
-- Base your narration on what actually happened (see mutation results)
-- If sensory events occurred, incorporate them into your narration
-- DO NOT invent new sounds, smells, or sensory events beyond what's listed
-- If action succeeded, describe the successful action vividly
-- If action failed, explain why and suggest alternatives
-- Keep responses concise but atmospheric%s%s`, mutationContext, sensoryContext)
-
-		req := openai.ChatCompletionRequest{
-			Model: "gpt-5-2025-08-07",
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role: openai.ChatMessageRoleSystem,
-					Content: systemPrompt,
-				},
-				{
-					Role: openai.ChatMessageRoleUser,
-					Content: worldContext + "PLAYER ACTION: " + userInput,
-				},
-			},
-			MaxCompletionTokens: 200,
-			ReasoningEffort:     "minimal",
-			Stream:              true,
+		systemPrompt := buildNarrationPrompt(mutationResults, sensoryEvents)
+		
+		req := llm.StreamCompletionRequest{
+			SystemPrompt: systemPrompt,
+			UserPrompt:   worldContext + "PLAYER ACTION: " + userInput,
+			MaxTokens:    200,
 		}
 		
-		stream, err := client.CreateChatCompletionStream(context.Background(), req)
+		stream, err := llmService.CompleteStream(context.Background(), req)
 		if err != nil {
 			if debug {
 				log.Printf("Stream creation error: %v", err)
