@@ -11,6 +11,7 @@ import (
 
 	"textadventure/internal/game"
 	"textadventure/internal/game/sensory"
+	"textadventure/internal/llm"
 )
 
 func BuildNPCWorldContext(npcID string, world game.WorldState, gameHistory []string) string {
@@ -73,53 +74,18 @@ type NPCActionMsg struct {
 }
 
 // GenerateNPCThoughts creates a tea.Cmd that generates thoughts for an NPC
-func GenerateNPCThoughts(client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
+func GenerateNPCThoughts(llmService *llm.Service, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
 	return func() tea.Msg {
-		if debug {
-			worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
-			
-			if debug {
-				log.Printf("=== NPC THOUGHTS GENERATION START ===")
-				log.Printf("NPC: %s", npcID)
-				log.Printf("World context length: %d chars", len(worldContext))
-			}
-		}
-
-		systemPrompt := fmt.Sprintf(`You are %s, an NPC in a text adventure game. You need to generate your internal thoughts based on the current world state and recent events.
-
-Your character:
-- Name: %s  
-- You are curious, intelligent, and responsive to your environment
-- You react to sounds, people entering/leaving, and changes in your surroundings
-- Keep thoughts concise and in-character
-
-Generate your internal thoughts based on what you observe, hear, or experience. This is your private mental state - no one else can hear these thoughts.
-
-Return only your thoughts, nothing else. Keep it to one line.`, npcID, npcID)
-
 		worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 		
-		req := openai.ChatCompletionRequest{
-			Model: "gpt-5-2025-08-07",
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleSystem,
-					Content: systemPrompt,
-				},
-				{
-					Role:    openai.ChatMessageRoleUser,
-					Content: worldContext,
-				},
-			},
-			MaxCompletionTokens: 150,
-			ReasoningEffort:     "minimal",
+		req := llm.TextCompletionRequest{
+			SystemPrompt: buildThoughtsPrompt(npcID),
+			UserPrompt:   worldContext,
+			MaxTokens:    150,
 		}
 
-		resp, err := client.CreateChatCompletion(context.Background(), req)
+		thoughts, err := llmService.CompleteText(context.Background(), req)
 		if err != nil {
-			if debug {
-				log.Printf("NPC thoughts generation error for %s: %v", npcID, err)
-			}
 			return NPCThoughtsMsg{
 				NPCID:    npcID,
 				Thoughts: "",
@@ -127,15 +93,7 @@ Return only your thoughts, nothing else. Keep it to one line.`, npcID, npcID)
 			}
 		}
 
-		thoughts := ""
-		if len(resp.Choices) > 0 {
-			thoughts = strings.TrimSpace(resp.Choices[0].Message.Content)
-		}
-
-		if debug {
-			log.Printf("Generated thoughts for %s: %q", npcID, thoughts)
-			log.Printf("=== NPC THOUGHTS GENERATION END ===")
-		}
+		thoughts = strings.TrimSpace(thoughts)
 
 		return NPCThoughtsMsg{
 			NPCID:    npcID,
@@ -209,7 +167,7 @@ Return only a brief action statement, or an empty string if you don't want to ac
 }
 
 // GenerateNPCTurn creates a tea.Cmd that handles a complete NPC turn (thoughts + action)
-func GenerateNPCTurn(client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
+func GenerateNPCTurn(llmService *llm.Service, client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
 	return func() tea.Msg {
 		thoughts := ""
 		if debug {
@@ -219,7 +177,7 @@ func GenerateNPCTurn(client *openai.Client, npcID string, world game.WorldState,
 			log.Printf("World context length: %d chars", len(worldContext))
 		}
 
-		thoughtsMsg := GenerateNPCThoughts(client, npcID, world, gameHistory, debug, sensoryEvents)()
+		thoughtsMsg := GenerateNPCThoughts(llmService, npcID, world, gameHistory, debug, sensoryEvents)()
 		if msg, ok := thoughtsMsg.(NPCThoughtsMsg); ok {
 			thoughts = msg.Thoughts
 		}

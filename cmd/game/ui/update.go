@@ -66,7 +66,7 @@ func (m Model) handleInitialLook(msg initialLookAroundMsg) (tea.Model, tea.Cmd) 
 func (m Model) handleNPCTurn(msg npcTurnMsg) (tea.Model, tea.Cmd) {
 	if !m.loading && m.turnPhase == NPCTurns && !m.npcTurnComplete {
 		m.npcTurnComplete = true
-		return m, actors.GenerateNPCTurn(m.client, "elena", m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled(), msg.sensoryEvents)
+		return m, actors.GenerateNPCTurn(m.llmService, m.client, "elena", m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled(), msg.sensoryEvents)
 	}
 	return m, nil
 }
