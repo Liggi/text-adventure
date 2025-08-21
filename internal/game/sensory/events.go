@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/sashabaranov/go-openai"
 
+	"textadventure/internal/debug"
 	"textadventure/internal/game"
 )
 
@@ -26,7 +26,7 @@ type SensoryEventResponse struct {
 }
 
 // GenerateSensoryEvents generates sensory events (sounds, etc.) for player or NPC actions
-func GenerateSensoryEvents(client *openai.Client, userInput string, successfulMutations []string, world game.WorldState, debug bool, actingNPCID ...string) (*SensoryEventResponse, error) {
+func GenerateSensoryEvents(client *openai.Client, userInput string, successfulMutations []string, world game.WorldState, debugLogger *debug.Logger, actingNPCID ...string) (*SensoryEventResponse, error) {
 	systemPrompt := `You are a sensory event generator for a text adventure game. Generate descriptive auditory events for player actions.
 
 Rules:
@@ -92,51 +92,39 @@ If no sound, return empty auditory_events array.`
 		},
 	}
 
-	if debug {
-		log.Printf("=== SENSORY EVENT GENERATION START ===")
-		log.Printf("Action: %q", userInput)
-		log.Printf("Context message: %s", contextMsg)
-		log.Printf("System prompt length: %d chars", len(systemPrompt))
-	}
+	debugLogger.Printf("=== SENSORY EVENT GENERATION START ===")
+	debugLogger.Printf("Action: %q", userInput)
+	debugLogger.Printf("Context message: %s", contextMsg)
+	debugLogger.Printf("System prompt length: %d chars", len(systemPrompt))
 
 	resp, err := client.CreateChatCompletion(context.Background(), req)
 	if err != nil {
-		if debug {
-			log.Printf("SENSORY EVENT API ERROR: %v", err)
-		}
+		debugLogger.Printf("SENSORY EVENT API ERROR: %v", err)
 		return nil, fmt.Errorf("sensory event generation failed: %w", err)
 	}
 
-	if debug {
-		log.Printf("API Response - Choices length: %d", len(resp.Choices))
-		if len(resp.Choices) > 0 {
-			log.Printf("Response choice 0 - Finish reason: %s", resp.Choices[0].FinishReason)
-		}
+	debugLogger.Printf("API Response - Choices length: %d", len(resp.Choices))
+	if len(resp.Choices) > 0 {
+		debugLogger.Printf("Response choice 0 - Finish reason: %s", resp.Choices[0].FinishReason)
 	}
 
 	var eventResp SensoryEventResponse
 	content := resp.Choices[0].Message.Content
 	
-	if debug {
-		log.Printf("Raw sensory event response length: %d", len(content))
-		log.Printf("Raw sensory event response: %q", content)
-	}
+	debugLogger.Printf("Raw sensory event response length: %d", len(content))
+	debugLogger.Printf("Raw sensory event response: %q", content)
 	
 	if err := json.Unmarshal([]byte(content), &eventResp); err != nil {
-		if debug {
-			log.Printf("JSON unmarshal failed: %v", err)
-			log.Printf("Returning empty sensory events response")
-		}
+		debugLogger.Printf("JSON unmarshal failed: %v", err)
+		debugLogger.Printf("Returning empty sensory events response")
 		return &SensoryEventResponse{AuditoryEvents: []SensoryEvent{}}, nil
 	}
 
-	if debug {
-		log.Printf("Generated %d sensory events", len(eventResp.AuditoryEvents))
-		for i, event := range eventResp.AuditoryEvents {
-			log.Printf("  Event %d: %s (volume: %s, location: %s)", i, event.Description, event.Volume, event.Location)
-		}
-		log.Printf("=== SENSORY EVENT GENERATION END ===")
+	debugLogger.Printf("Generated %d sensory events", len(eventResp.AuditoryEvents))
+	for i, event := range eventResp.AuditoryEvents {
+		debugLogger.Printf("  Event %d: %s (volume: %s, location: %s)", i, event.Description, event.Volume, event.Location)
 	}
+	debugLogger.Printf("=== SENSORY EVENT GENERATION END ===")
 
 	return &eventResp, nil
 }

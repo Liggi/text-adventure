@@ -200,7 +200,7 @@ func (d *Director) ProcessPlayerAction(userInput string, world game.WorldState, 
 			newWorld = mcp.MCPToGameWorldState(mcpWorld)
 		}
 		
-		sensoryEvents, err := sensory.GenerateSensoryEvents(d.client, userInput, executionResult.Successes, newWorld, d.debugLogger != nil, npcID)
+		sensoryEvents, err := sensory.GenerateSensoryEvents(d.client, userInput, executionResult.Successes, newWorld, d.debugLogger, npcID)
 		if err != nil {
 			sensoryEvents = &sensory.SensoryEventResponse{AuditoryEvents: []sensory.SensoryEvent{}}
 		}
