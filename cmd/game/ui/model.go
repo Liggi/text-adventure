@@ -4,7 +4,6 @@ import (
 	"fmt"
 	
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sashabaranov/go-openai"
 	
 	"textadventure/internal/debug"
 	"textadventure/internal/game"
@@ -34,7 +33,6 @@ type Model struct {
 	cursor                  int
 	width                   int
 	height                  int
-	client                  *openai.Client
 	llmService              *llm.Service
 	mcpClient               *mcp.WorldStateClient
 	loggers                 GameLoggers
@@ -52,7 +50,6 @@ type Model struct {
 }
 
 func NewModel(
-	client *openai.Client,
 	llmService *llm.Service,
 	mcpClient *mcp.WorldStateClient,
 	loggers GameLoggers,
@@ -70,7 +67,6 @@ func NewModel(
 		messages:                messages,
 		input:                   "",
 		cursor:                  0,
-		client:                  client,
 		llmService:              llmService,
 		mcpClient:               mcpClient,
 		loggers:                 loggers,

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sashabaranov/go-openai"
-
 	"textadventure/cmd/game/ui"
 	"textadventure/internal/debug"
 	"textadventure/internal/llm"
@@ -20,7 +18,6 @@ func createApp() (ui.Model, error) {
 		return ui.Model{}, fmt.Errorf("please set OPENAI_API_KEY environment variable")
 	}
 	
-	client := openai.NewClient(apiKey)
 	debugMode := os.Getenv("DEBUG") == "1" || os.Getenv("DEBUG") == "true"
 	
 	debugLogger := debug.NewLogger(debugMode)
@@ -60,7 +57,7 @@ func createApp() (ui.Model, error) {
 		Debug:      debugLogger,
 		Completion: logger,
 	}
-	model := ui.NewModel(client, llmService, mcpClient, loggers, world)
+	model := ui.NewModel(llmService, mcpClient, loggers, world)
 	
 	return model, nil
 }
