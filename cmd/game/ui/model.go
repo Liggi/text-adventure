@@ -74,7 +74,7 @@ func NewModel(
 		llmService:              llmService,
 		mcpClient:               mcpClient,
 		loggers:                 loggers,
-		director:                director.NewDirector(client, llmService, mcpClient, loggers.Debug),
+		director:                director.NewDirector(llmService, mcpClient, loggers.Debug),
 		world:                   world,
 		gameHistory:             game.NewHistory(6),
 		turnPhase:               PlayerTurn,

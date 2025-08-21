@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sashabaranov/go-openai"
 
 	"textadventure/internal/debug"
 	"textadventure/internal/game"
@@ -21,7 +20,6 @@ import (
 // It serves as the central controller that interprets user intent and executes corresponding
 // world changes through MCP tools.
 type Director struct {
-	client       *openai.Client
 	llmService   *llm.Service
 	mcpClient    *mcp.WorldStateClient
 	debugLogger  *debug.Logger
@@ -29,9 +27,8 @@ type Director struct {
 
 // NewDirector creates a new Director with the required dependencies for LLM interaction,
 // world state management, and debug logging.
-func NewDirector(client *openai.Client, llmService *llm.Service, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger) *Director {
+func NewDirector(llmService *llm.Service, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger) *Director {
 	return &Director{
-		client:      client,
 		llmService:  llmService,
 		mcpClient:   mcpClient,
 		debugLogger: debugLogger,
@@ -134,19 +131,19 @@ func (d *Director) InterpretIntent(userInput string, world game.WorldState, game
 	}
 
 	actionLabel := getActionLabel(actingNPCID)
-	systemPrompt := buildSystemPrompt(toolDescriptions, world, gameHistory, actionLabel, actingNPCID)
+	
+	req := llm.JSONCompletionRequest{
+		SystemPrompt: buildDirectorPrompt(toolDescriptions, world, gameHistory, actionLabel, actingNPCID),
+		UserPrompt:   fmt.Sprintf("%s: %s", actionLabel, userInput),
+		MaxTokens:    400,
+	}
 
-	req := buildCompletionRequest(systemPrompt, actionLabel, userInput)
-
-	d.debugLogger.Printf("Processing action: %q", userInput)
-
-	resp, err := d.client.CreateChatCompletion(context.Background(), req)
+	content, err := d.llmService.CompleteJSON(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("mutation generation failed: %w", err)
 	}
 
 	var actionPlan ActionPlan
-	content := resp.Choices[0].Message.Content
 	
 	if err := json.Unmarshal([]byte(content), &actionPlan); err != nil {
 		d.debugLogger.Printf("Failed to parse LLM response: %v", err)
@@ -280,55 +277,3 @@ func getActionLabel(actingNPCID string) string {
 	return "Player action"
 }
 
-// buildSystemPrompt constructs the system prompt for the LLM Director.
-// This prompt defines the LLM's role and provides context for decision making.
-func buildSystemPrompt(toolDescriptions string, world game.WorldState, gameHistory []string, actionLabel string, actingNPCID string) string {
-	return fmt.Sprintf(`You are the Director of a text adventure game. Your role is to understand player intent and generate the specific world mutations needed to make it happen.
-
-%s
-
-WORLD STATE CONTEXT:
-%s
-
-RULES:
-- Parse the %s and decide what world mutations are needed
-- Generate JSON array of mutations using the available tools
-- Be conservative - only generate mutations that directly relate to the stated action
-- For movement: use move_player tool
-- For picking up items: use transfer_item to move from location to player, then add_to_inventory
-- For dropping items: use remove_from_inventory, then transfer_item to move to current location
-- For examining/looking: usually no mutations needed
-- NPCs can only affect items at their current location or their own movement
-
-Return JSON format:
-{
-  "mutations": [
-    {"tool": "move_player", "args": {"location": "kitchen"}},
-    {"tool": "transfer_item", "args": {"item": "key", "from_location": "foyer", "to_location": "player"}}
-  ]
-}
-
-If no mutations needed, return empty mutations array.`, toolDescriptions, game.BuildWorldContext(world, gameHistory, actingNPCID), actionLabel)
-}
-
-// buildCompletionRequest creates an OpenAI chat completion request with appropriate settings.
-func buildCompletionRequest(systemPrompt, actionLabel, userInput string) openai.ChatCompletionRequest {
-	return openai.ChatCompletionRequest{
-		Model: "gpt-5-2025-08-07",
-		Messages: []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: systemPrompt,
-			},
-			{
-				Role:    openai.ChatMessageRoleUser,
-				Content: fmt.Sprintf("%s: %s", actionLabel, userInput),
-			},
-		},
-		MaxCompletionTokens: 400,
-		ReasoningEffort:     "minimal",
-		ResponseFormat: &openai.ChatCompletionResponseFormat{
-			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
-		},
-	}
-}
