@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sashabaranov/go-openai"
 
 	"textadventure/internal/game"
 	"textadventure/internal/game/sensory"
@@ -104,70 +103,31 @@ func GenerateNPCThoughts(llmService *llm.Service, npcID string, world game.World
 }
 
 // GenerateNPCAction generates an action for an NPC based on their thoughts and world state
-func GenerateNPCAction(client *openai.Client, npcID string, npcThoughts string, world game.WorldState, sensoryEvents *sensory.SensoryEventResponse, debug bool) (string, error) {
+func GenerateNPCAction(llmService *llm.Service, npcID string, npcThoughts string, world game.WorldState, sensoryEvents *sensory.SensoryEventResponse, debug bool) (string, error) {
 	if npcThoughts == "" {
 		return "", nil
 	}
 
 	worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 	
-	systemPrompt := fmt.Sprintf(`You are %s, an NPC in a text adventure game. Based on your thoughts and the current situation, decide what action to take.
-
-Your character:
-- Name: %s
-- You are curious, intelligent, and responsive to your environment
-- You can move between rooms, pick up items, talk to people, or interact with objects
-- You should react naturally to sounds, people, and changes in your environment
-
-Your current thoughts: "%s"
-
-Based on your thoughts and the world state, what do you want to do? You can:
-- Move to a different room (e.g., "go to kitchen") 
-- Say something (e.g., "say Hello there!")
-- Pick up an item (e.g., "take key")
-- Look around or examine something
-- Do nothing (return empty string)
-
-Return only a brief action statement, or an empty string if you don't want to act.`, npcID, npcID, npcThoughts)
-
-	req := openai.ChatCompletionRequest{
-		Model: "gpt-5-2025-08-07",
-		Messages: []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: systemPrompt,
-			},
-			{
-				Role:    openai.ChatMessageRoleUser,
-				Content: worldContext,
-			},
-		},
-		MaxCompletionTokens: 100,
-		ReasoningEffort:     "minimal",
+	req := llm.TextCompletionRequest{
+		SystemPrompt: buildActionPrompt(npcID, npcThoughts),
+		UserPrompt:   worldContext,
+		MaxTokens:    100,
 	}
 
-	resp, err := client.CreateChatCompletion(context.Background(), req)
+	action, err := llmService.CompleteText(context.Background(), req)
 	if err != nil {
-		if debug {
-			log.Printf("NPC action generation error for %s: %v", npcID, err)
-		}
 		return "", err
 	}
 
-	action := ""
-	if len(resp.Choices) > 0 {
-		action = strings.TrimSpace(resp.Choices[0].Message.Content)
-	}
-
-	if debug {
-		log.Printf("Generated action for %s: %q", npcID, action)
-	}
+	action = strings.TrimSpace(action)
 
 	return action, nil
 }
 
 // GenerateNPCTurn creates a tea.Cmd that handles a complete NPC turn (thoughts + action)
-func GenerateNPCTurn(llmService *llm.Service, client *openai.Client, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
+func GenerateNPCTurn(llmService *llm.Service, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
 	return func() tea.Msg {
 		thoughts := ""
 		if debug {
@@ -182,7 +142,7 @@ func GenerateNPCTurn(llmService *llm.Service, client *openai.Client, npcID strin
 			thoughts = msg.Thoughts
 		}
 
-		action, err := GenerateNPCAction(client, npcID, thoughts, world, sensoryEvents, debug)
+		action, err := GenerateNPCAction(llmService, npcID, thoughts, world, sensoryEvents, debug)
 		if err != nil {
 			if debug {
 				log.Printf("Error generating action for %s: %v", npcID, err)
