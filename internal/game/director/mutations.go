@@ -11,5 +11,6 @@ import (
 )
 
 func StartTwoStepLLMFlow(client *openai.Client, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger, actingNPCID ...string) tea.Cmd {
-	return ProcessPlayerAction(client, userInput, world, gameHistory, logger, mcpClient, debugLogger, actingNPCID...)
+	director := NewDirector(client, mcpClient, debugLogger)
+	return director.ProcessPlayerAction(userInput, world, gameHistory, logger, actingNPCID...)
 }
