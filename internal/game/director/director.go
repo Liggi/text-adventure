@@ -268,48 +268,6 @@ func (d *Director) executeWithRetry(ctx context.Context, userInput string, world
 	return &ExecutionResult{Successes: allSuccesses, Failures: allFailures}, nil
 }
 
-// buildWorldContext creates a formatted context string describing the current world state.
-// The format varies depending on whether this is for a player or NPC action.
-func buildWorldContext(world game.WorldState, gameHistory []string, actingNPCID ...string) string {
-	var context strings.Builder
-	
-	context.WriteString("WORLD STATE:\n")
-	
-	if len(actingNPCID) > 0 && actingNPCID[0] != "" {
-		npcID := actingNPCID[0]
-		if npc, exists := world.NPCs[npcID]; exists {
-			currentLoc := world.Locations[npc.Location]
-			context.WriteString(fmt.Sprintf("NPC %s Location: %s (%s)\n", npcID, currentLoc.Title, npc.Location))
-			context.WriteString(currentLoc.Description + "\n")
-			context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
-			context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
-			
-			if world.Location == npc.Location {
-				context.WriteString("Player is also here\n")
-				context.WriteString(fmt.Sprintf("Player Inventory: %v\n", world.Inventory))
-			}
-		}
-	} else {
-		currentLoc := world.Locations[world.Location]
-		context.WriteString("Player Location: " + currentLoc.Title + " (" + world.Location + ")\n")
-		context.WriteString(currentLoc.Description + "\n")
-		context.WriteString(fmt.Sprintf("Player Inventory: %v\n", world.Inventory))
-		context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
-		context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
-	}
-	
-	context.WriteString("\n")
-	
-	if len(gameHistory) > 0 {
-		context.WriteString("RECENT CONVERSATION:\n")
-		for _, exchange := range gameHistory {
-			context.WriteString(exchange + "\n")
-		}
-		context.WriteString("\n")
-	}
-	
-	return context.String()
-}
 
 // getActionLabel returns the appropriate action label for logging and prompts.
 func getActionLabel(actingNPCID string) string {
@@ -347,7 +305,7 @@ Return JSON format:
   ]
 }
 
-If no mutations needed, return empty mutations array.`, toolDescriptions, buildWorldContext(world, gameHistory, actingNPCID), actionLabel)
+If no mutations needed, return empty mutations array.`, toolDescriptions, game.BuildWorldContext(world, gameHistory, actingNPCID), actionLabel)
 }
 
 // buildCompletionRequest creates an OpenAI chat completion request with appropriate settings.

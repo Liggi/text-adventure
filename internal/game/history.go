@@ -1,6 +1,9 @@
 package game
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type History struct {
 	exchanges []string
@@ -44,25 +47,71 @@ func (h *History) GetEntries() []string {
 	return result
 }
 
-func (h *History) BuildContext(world WorldState) string {
-	currentLoc := world.Locations[world.Location]
-	context := fmt.Sprintf(`WORLD STATE:
-Current Location: %s (%s)
-%s
 
-Available Items Here: %v
-Available Exits: %v
-Player Inventory: %v
-
-`, currentLoc.Title, world.Location, currentLoc.Description, currentLoc.Items, currentLoc.Exits, world.Inventory)
-
-	if len(h.exchanges) > 0 {
-		context += "RECENT CONVERSATION:\n"
-		for _, exchange := range h.exchanges {
-			context += exchange + "\n"
+// BuildWorldContext creates a comprehensive formatted context string for LLMs.
+// It handles both player and NPC perspectives, including co-location detection,
+// world state, and conversation history.
+func BuildWorldContext(world WorldState, gameHistory []string, actingNPCID ...string) string {
+	var context strings.Builder
+	
+	context.WriteString("WORLD STATE:\n")
+	
+	if len(actingNPCID) > 0 && actingNPCID[0] != "" {
+		// NPC perspective
+		npcID := actingNPCID[0]
+		if npc, exists := world.NPCs[npcID]; exists {
+			currentLoc := world.Locations[npc.Location]
+			context.WriteString(fmt.Sprintf("NPC %s Location: %s (%s)\n", npcID, currentLoc.Title, npc.Location))
+			context.WriteString(currentLoc.Description + "\n")
+			context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
+			context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
+			
+			// Show co-location with player
+			if world.Location == npc.Location {
+				context.WriteString("Player is also here\n")
+				context.WriteString(fmt.Sprintf("Player Inventory: %v\n", world.Inventory))
+			}
+			
+			// Show other NPCs at this location
+			var otherNPCs []string
+			for otherNPCID, otherNPC := range world.NPCs {
+				if otherNPCID != npcID && otherNPC.Location == npc.Location {
+					otherNPCs = append(otherNPCs, otherNPCID)
+				}
+			}
+			if len(otherNPCs) > 0 {
+				context.WriteString(fmt.Sprintf("Other NPCs here: %v\n", otherNPCs))
+			}
 		}
-		context += "\n"
+	} else {
+		// Player perspective
+		currentLoc := world.Locations[world.Location]
+		context.WriteString("Player Location: " + currentLoc.Title + " (" + world.Location + ")\n")
+		context.WriteString(currentLoc.Description + "\n")
+		context.WriteString(fmt.Sprintf("Player Inventory: %v\n", world.Inventory))
+		context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
+		context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
+		
+		// Show NPCs at player's location
+		var npcsHere []string
+		for npcID, npc := range world.NPCs {
+			if npc.Location == world.Location {
+				npcsHere = append(npcsHere, npcID)
+			}
+		}
+		if len(npcsHere) > 0 {
+			context.WriteString(fmt.Sprintf("NPCs here: %v\n", npcsHere))
+		}
 	}
-
-	return context
+	
+	
+	if len(gameHistory) > 0 {
+		context.WriteString("RECENT CONVERSATION:\n")
+		for _, exchange := range gameHistory {
+			context.WriteString(exchange + "\n")
+		}
+		context.WriteString("\n")
+	}
+	
+	return context.String()
 }

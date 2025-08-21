@@ -57,7 +57,7 @@ func StartLLMStream(client *openai.Client, userInput string, world game.WorldSta
 		}
 		
 		startTime := time.Now()
-		worldContext := BuildWorldContext(world, gameHistory, actingNPCID...)
+		worldContext := game.BuildWorldContext(world, gameHistory, actingNPCID...)
 		var mutationContext string
 		if len(mutationResults) > 0 {
 			mutationContext = "\n\nMUTATIONS THAT JUST OCCURRED:\n" + strings.Join(mutationResults, "\n") + "\n\nThe world state above reflects these changes. Narrate based on what actually happened."
@@ -184,49 +184,3 @@ type StreamErrorMsg struct {
 	Err      error
 }
 
-// BuildWorldContext constructs context string for LLM narration
-func BuildWorldContext(world game.WorldState, gameHistory []string, actingNPCID ...string) string {
-	var currentLocation string
-	
-	if len(actingNPCID) > 0 && actingNPCID[0] != "" {
-		npc, exists := world.NPCs[actingNPCID[0]]
-		if exists {
-			currentLocation = npc.Location
-		} else {
-			currentLocation = world.Location
-		}
-	} else {
-		currentLocation = world.Location
-	}
-	
-	currentLoc := world.Locations[currentLocation]
-	context := "WORLD STATE:\n"
-	context += "Current Location: " + currentLoc.Title + " (" + currentLocation + ")\n"
-	context += currentLoc.Description + "\n"
-	
-	// Add NPCs present in this location
-	var npcsHere []string
-	for npcID, npc := range world.NPCs {
-		if npc.Location == currentLocation {
-			npcsHere = append(npcsHere, npcID)
-		}
-	}
-	if len(npcsHere) > 0 {
-		context += "\nPeople here: " + fmt.Sprintf("%v", npcsHere) + "\n"
-	}
-	context += "\n"
-	
-	context += "Available Items Here: " + fmt.Sprintf("%v", currentLoc.Items) + "\n"
-	context += "Available Exits: " + fmt.Sprintf("%v", currentLoc.Exits) + "\n"
-	context += "Player Inventory: " + fmt.Sprintf("%v", world.Inventory) + "\n\n"
-
-	if len(gameHistory) > 0 {
-		context += "RECENT CONVERSATION:\n"
-		for _, exchange := range gameHistory {
-			context += exchange + "\n"
-		}
-		context += "\n"
-	}
-
-	return context
-}

@@ -13,105 +13,47 @@ import (
 	"textadventure/internal/game/sensory"
 )
 
-// BuildNPCWorldContext creates world context for an NPC without sensory information
 func BuildNPCWorldContext(npcID string, world game.WorldState, gameHistory []string) string {
-	npc, exists := world.NPCs[npcID]
-	if !exists {
-		// Fallback - this would need buildWorldContext from commands.go, but we'll handle that later
+	if _, exists := world.NPCs[npcID]; !exists {
 		return fmt.Sprintf("ERROR: NPC %s not found", npcID)
 	}
-	
-	currentLoc := world.Locations[npc.Location]
-	context := "WORLD STATE:\n"
-	context += "Current Location: " + currentLoc.Title + " (" + npc.Location + ")\n"
-	context += currentLoc.Description + "\n"
-	
-	var peopleHere []string
-	if world.Location == npc.Location {
-		peopleHere = append(peopleHere, "player")
-	}
-	for otherNPCID, otherNPC := range world.NPCs {
-		if otherNPCID != npcID && otherNPC.Location == npc.Location {
-			peopleHere = append(peopleHere, otherNPCID)
-		}
-	}
-	if len(peopleHere) > 0 {
-		context += "\nPeople here: " + fmt.Sprintf("%v", peopleHere) + "\n"
-	}
-	context += "\n"
-	
-	context += "Available Items Here: " + fmt.Sprintf("%v", currentLoc.Items) + "\n"
-	context += "Available Exits: " + fmt.Sprintf("%v", currentLoc.Exits) + "\n"
-	
-	if world.Location == npc.Location {
-		context += "Player Inventory: " + fmt.Sprintf("%v", world.Inventory) + "\n"
-	}
-	context += "\n"
-
-	if len(gameHistory) > 0 {
-		context += "RECENT CONVERSATION:\n"
-		for _, exchange := range gameHistory {
-			context += exchange + "\n"
-		}
-		context += "\n"
-	}
-
-	return context
+	return game.BuildWorldContext(world, gameHistory, npcID)
 }
 
-// BuildNPCWorldContextWithSenses creates world context for an NPC including sensory events
 func BuildNPCWorldContextWithSenses(npcID string, world game.WorldState, sensoryEvents *sensory.SensoryEventResponse) string {
-	npc, exists := world.NPCs[npcID]
-	if !exists {
+	if _, exists := world.NPCs[npcID]; !exists {
 		return "ERROR: NPC not found"
 	}
 	
-	currentLoc := world.Locations[npc.Location]
-	context := "WORLD STATE:\n"
-	context += "Current Location: " + currentLoc.Title + " (" + npc.Location + ")\n"
-	context += currentLoc.Description + "\n"
+	baseContext := game.BuildWorldContext(world, []string{}, npcID)
 	
-	var peopleHere []string
-	if world.Location == npc.Location {
-		peopleHere = append(peopleHere, "player")
-	}
-	for otherNPCID, otherNPC := range world.NPCs {
-		if otherNPCID != npcID && otherNPC.Location == npc.Location {
-			peopleHere = append(peopleHere, otherNPCID)
-		}
-	}
-	if len(peopleHere) > 0 {
-		context += "\nPeople here: " + fmt.Sprintf("%v", peopleHere) + "\n"
-	}
-	context += "\n"
-	
-	context += "Available Items Here: " + fmt.Sprintf("%v", currentLoc.Items) + "\n"
-	context += "Available Exits: " + fmt.Sprintf("%v", currentLoc.Exits) + "\n"
-	
-	if world.Location == npc.Location {
-		context += "Player Inventory: " + fmt.Sprintf("%v", world.Inventory) + "\n"
-	}
-	context += "\n"
-
 	// Add sensory events that the NPC can perceive
 	if sensoryEvents != nil && len(sensoryEvents.AuditoryEvents) > 0 {
-		context += "RECENT SOUNDS:\n"
+		npc := world.NPCs[npcID]
+		sensoryContext := "RECENT SOUNDS:\n"
 		for _, event := range sensoryEvents.AuditoryEvents {
 			distance := sensory.CalculateRoomDistance(npc.Location, event.Location, world.Locations)
 			decayedVolume := sensory.ApplyVolumeDecay(event.Volume, distance)
 			
 			if decayedVolume != "" {
 				if distance == 0 {
-					context += fmt.Sprintf("- %s (heard clearly)\n", event.Description)
+					sensoryContext += fmt.Sprintf("- %s (heard clearly)\n", event.Description)
 				} else {
-					context += fmt.Sprintf("- %s (heard %s from %s)\n", event.Description, decayedVolume, event.Location)
+					sensoryContext += fmt.Sprintf("- %s (heard %s from %s)\n", event.Description, decayedVolume, event.Location)
 				}
 			}
 		}
-		context += "\n"
+		sensoryContext += "\n"
+		
+		// Insert sensory events before the conversation history
+		if strings.Contains(baseContext, "RECENT CONVERSATION:") {
+			return strings.Replace(baseContext, "RECENT CONVERSATION:", sensoryContext+"RECENT CONVERSATION:", 1)
+		} else {
+			return baseContext + sensoryContext
+		}
 	}
-
-	return context
+	
+	return baseContext
 }
 
 // NPCThoughtsMsg represents the result of NPC thought generation
