@@ -58,7 +58,7 @@ func (m Model) handleInitialLook(msg initialLookAroundMsg) (tea.Model, tea.Cmd) 
 		m.messages = append(m.messages, "LOADING_ANIMATION")
 		m.turnPhase = Narration
 		
-		return m, tea.Batch(director.StartTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.loggers.Completion, m.mcpClient, m.loggers.Debug), animationTimer())
+		return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory, m.loggers.Completion), animationTimer())
 	}
 	return m, nil
 }
@@ -78,7 +78,7 @@ func (m Model) handleNarrationTurn(msg narrationTurnMsg) (tea.Model, tea.Cmd) {
 		m.messages = append(m.messages, "LOADING_ANIMATION")
 		
 		userInput := "narrate recent events"
-		return m, tea.Batch(director.StartTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.loggers.Completion, m.mcpClient, m.loggers.Debug), animationTimer())
+		return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory, m.loggers.Completion), animationTimer())
 	}
 	return m, nil
 }
@@ -145,7 +145,7 @@ func (m Model) handleNPCAction(msg actors.NPCActionMsg) (tea.Model, tea.Cmd) {
 		m.animationFrame = 0
 		m.messages = append(m.messages, "LOADING_ANIMATION")
 		
-		return m, tea.Batch(director.StartTwoStepLLMFlow(m.client, msg.Action, m.world, m.gameHistory, m.loggers.Completion, m.mcpClient, m.loggers.Debug, msg.NPCID), animationTimer())
+		return m, tea.Batch(m.director.ProcessPlayerAction(msg.Action, m.world, m.gameHistory, m.loggers.Completion, msg.NPCID), animationTimer())
 	}
 	return m, nil
 }
@@ -336,7 +336,7 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			m.turnPhase = PlayerTurn
 			
-			return m, tea.Batch(director.StartTwoStepLLMFlow(m.client, userInput, m.world, m.gameHistory, m.loggers.Completion, m.mcpClient, m.loggers.Debug), animationTimer())
+			return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory, m.loggers.Completion), animationTimer())
 		}
 		return m, nil
 
