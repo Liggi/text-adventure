@@ -17,8 +17,11 @@ func MCPToGameWorldState(mcpWorld *WorldState) game.WorldState {
 	gameNPCs := make(map[string]game.NPCInfo)
 	for npcID, mcpNPC := range mcpWorld.NPCs {
 		gameNPCs[npcID] = game.NPCInfo{
-			Location:   mcpNPC.Location,
-			DebugColor: mcpNPC.DebugColor,
+			Location:       mcpNPC.Location,
+			DebugColor:     mcpNPC.DebugColor,
+			Inventory:      mcpNPC.Inventory,
+			RecentThoughts: mcpNPC.RecentThoughts,
+			RecentActions:  mcpNPC.RecentActions,
 		}
 	}
 	

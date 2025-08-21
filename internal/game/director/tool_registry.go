@@ -20,10 +20,12 @@ var toolRegistry = make(map[string]MCPTool)
 func init() {
 	RegisterTool(&tools.GetWorldStateTool{})
 	RegisterTool(&tools.MovePlayerTool{})
+	RegisterTool(&tools.MoveNPCTool{})
 	RegisterTool(&tools.TransferItemTool{})
 	RegisterTool(&tools.AddToInventoryTool{})
 	RegisterTool(&tools.RemoveFromInventoryTool{})
 	RegisterTool(&tools.UnlockDoorTool{})
+	RegisterTool(&tools.UpdateNPCMemoryTool{})
 }
 
 func RegisterTool(tool MCPTool) {

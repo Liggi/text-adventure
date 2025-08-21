@@ -15,9 +15,11 @@ type LocationInfo struct {
 }
 
 type NPCInfo struct {
-	Location   string
-	DebugColor string
-	Inventory  []string
+	Location      string
+	DebugColor    string
+	Inventory     []string
+	RecentThoughts []string
+	RecentActions []string
 }
 
 func NewDefaultWorldState() WorldState {

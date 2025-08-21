@@ -115,7 +115,10 @@ DEFAULT_WORLD_STATE = {
     "npcs": {
         "elena": {
             "location": "library",
-            "debug_color": "35"
+            "debug_color": "35",
+            "inventory": [],
+            "recent_thoughts": [],
+            "recent_actions": []
         }
     }
 }
@@ -193,6 +196,44 @@ async def move_player(location: str) -> str:
     save_world_state(state)
     
     return f"Player moved from {current_location} to {location}"
+
+
+@mcp.tool()
+async def move_npc(npc_id: str, location: str) -> str:
+    """Move an NPC to a different location.
+    
+    Args:
+        npc_id: The NPC ID to move (e.g., "elena")
+        location: The location ID to move the NPC to (e.g., "study", "foyer")
+        
+    Returns:
+        Success message or error description
+    """
+    state = load_world_state()
+    
+    if npc_id not in state.get("npcs", {}):
+        return f"Error: NPC '{npc_id}' does not exist"
+    
+    npc = state["npcs"][npc_id]
+    current_location = npc["location"]
+    
+    if location not in state["locations"]:
+        return f"Error: Location '{location}' does not exist"
+    
+    current_exits = state["locations"][current_location].get("exits", {})
+    if location not in current_exits.values():
+        return f"Error: Cannot move directly from {current_location} to {location}"
+    
+    for direction, target in current_exits.items():
+        if target == location:
+            door_state = state["locations"][current_location].get("door_states", {}).get(direction, {})
+            if door_state.get("locked", False):
+                return f"Error: The {door_state.get('description', 'door')} is locked"
+    
+    state["npcs"][npc_id]["location"] = location
+    save_world_state(state)
+    
+    return f"NPC {npc_id} moved from {current_location} to {location}"
 
 
 @mcp.tool()
@@ -338,6 +379,44 @@ async def unlock_door(location: str, direction: str, key_item: str) -> str:
     save_world_state(state)
     
     return f"Door to the {direction} in {location} has been unlocked with {key_item}"
+
+
+@mcp.tool()
+async def update_npc_memory(npc_id: str, thought: str = "", action: str = "") -> str:
+    state = load_world_state()
+    
+    if npc_id not in state["npcs"]:
+        return f"Error: NPC '{npc_id}' does not exist"
+    
+    npc = state["npcs"][npc_id]
+    
+    if "recent_thoughts" not in npc:
+        npc["recent_thoughts"] = []
+    if "recent_actions" not in npc:
+        npc["recent_actions"] = []
+    
+    if thought:
+        npc["recent_thoughts"].append(thought)
+        if len(npc["recent_thoughts"]) > 4:
+            npc["recent_thoughts"] = npc["recent_thoughts"][-4:]
+    
+    if action:
+        npc["recent_actions"].append(action)
+        if len(npc["recent_actions"]) > 4:
+            npc["recent_actions"] = npc["recent_actions"][-4:]
+    
+    save_world_state(state)
+    
+    updates = []
+    if thought:
+        updates.append(f"thought: '{thought}'")
+    if action:
+        updates.append(f"action: '{action}'")
+    
+    if updates:
+        return f"Updated {npc_id} memory - {', '.join(updates)}"
+    else:
+        return f"No updates provided for {npc_id}"
 
 
 if __name__ == "__main__":

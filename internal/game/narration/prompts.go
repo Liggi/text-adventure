@@ -33,5 +33,7 @@ Rules:
 - DO NOT invent new sounds, smells, or sensory events beyond what's listed
 - If action succeeded, describe the successful action vividly
 - If action failed, explain why and suggest alternatives
-- Keep responses concise but atmospheric%s%s`, mutationContext, sensoryContext)
+- Keep responses concise but atmospheric
+- ALWAYS use present tense: "You scan the room" not "You scanned the room"
+- Write as if the action is happening right now%s%s`, mutationContext, sensoryContext)
 }

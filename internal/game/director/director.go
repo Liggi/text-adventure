@@ -205,6 +205,13 @@ func (d *Director) ProcessPlayerAction(userInput string, world game.WorldState, 
 			sensoryEvents = &sensory.SensoryEventResponse{AuditoryEvents: []sensory.SensoryEvent{}}
 		}
 		
+		if d.debugLogger != nil && len(sensoryEvents.AuditoryEvents) > 0 {
+			d.debugLogger.Printf("=== SENSORY EVENTS GENERATED ===")
+			for _, event := range sensoryEvents.AuditoryEvents {
+				d.debugLogger.Printf("🔊 %s (%s) at %s", event.Description, event.Volume, event.Location)
+			}
+		}
+		
 		var allMessages []string
 		if d.debugLogger != nil {
 			allMessages = append(allMessages, "[MUTATIONS]")

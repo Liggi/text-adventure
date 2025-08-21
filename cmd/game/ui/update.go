@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -140,12 +141,18 @@ func (m Model) handleNPCAction(msg actors.NPCActionMsg) (tea.Model, tea.Cmd) {
 			m.messages = append(m.messages, "")
 		}
 		
+		updateMemoryCmd := m.updateNPCMemory(msg.NPCID, msg.Thoughts, msg.Action)
+		
 		m.gameHistory.AddNPCAction(msg.NPCID, msg.Action)
 		m.loading = true
 		m.animationFrame = 0
 		m.messages = append(m.messages, "LOADING_ANIMATION")
 		
-		return m, tea.Batch(m.director.ProcessPlayerAction(msg.Action, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, msg.NPCID), animationTimer())
+		return m, tea.Batch(
+			updateMemoryCmd,
+			m.director.ProcessPlayerAction(msg.Action, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, msg.NPCID), 
+			animationTimer(),
+		)
 	}
 	return m, nil
 }
@@ -236,27 +243,50 @@ func (m Model) handleMutationsGenerated(msg director.MutationsGeneratedMsg) (tea
 		m.world = msg.NewWorld
 		
 		if msg.Debug && len(msg.Mutations) > 0 {
+			actorLabel := "PLAYER"
+			if msg.ActingNPCID != "" {
+				actorLabel = strings.ToUpper(msg.ActingNPCID)
+			}
+			
+			mutationHeader := fmt.Sprintf("\033[35m[%s MUTATIONS]\033[0m", actorLabel)
+			m.messages = append(m.messages, mutationHeader)
+			
 			for _, mutation := range msg.Mutations {
-				m.messages = append(m.messages, mutation)
+				if !strings.HasPrefix(mutation, "[MUTATIONS]") {
+					coloredMutation := fmt.Sprintf("\033[35m  %s\033[0m", mutation)
+					m.messages = append(m.messages, coloredMutation)
+				}
 			}
 		}
 		
 		if len(msg.Failures) > 0 && msg.Debug {
 			for _, failure := range msg.Failures {
-				m.messages = append(m.messages, "[ERROR] "+failure)
+				coloredError := fmt.Sprintf("\033[31m  [ERROR] %s\033[0m", failure)
+				m.messages = append(m.messages, coloredError)
 			}
 		}
 		
 		if msg.Debug && msg.SensoryEvents != nil {
+			actorLabel := "PLAYER"
+			if msg.ActingNPCID != "" {
+				actorLabel = strings.ToUpper(msg.ActingNPCID)
+			}
+			
 			if len(msg.SensoryEvents.AuditoryEvents) > 0 {
-				m.messages = append(m.messages, "[SENSORY EVENTS]")
+				sensoryHeader := fmt.Sprintf("\033[36m[%s SENSORY EVENTS]\033[0m", actorLabel)
+				m.messages = append(m.messages, sensoryHeader)
 				for _, event := range msg.SensoryEvents.AuditoryEvents {
-					eventMsg := fmt.Sprintf("  🔊 %s (%s) at %s", event.Description, event.Volume, event.Location)
+					eventMsg := fmt.Sprintf("\033[36m  🔊 %s (%s) at %s\033[0m", event.Description, event.Volume, event.Location)
 					m.messages = append(m.messages, eventMsg)
 				}
 			} else {
-				m.messages = append(m.messages, "[SENSORY EVENTS] No auditory events")
+				sensoryHeader := fmt.Sprintf("\033[36m[%s SENSORY EVENTS] No auditory events\033[0m", actorLabel)
+				m.messages = append(m.messages, sensoryHeader)
 			}
+		}
+		
+		if msg.Debug && (len(msg.Mutations) > 0 || msg.SensoryEvents != nil) {
+			m.messages = append(m.messages, "")
 		}
 		
 		if msg.SensoryEvents != nil {
@@ -344,6 +374,22 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input += msg.String()
 		}
 		return m, nil
+	}
+}
+
+func (m Model) updateNPCMemory(npcID, thoughts, action string) tea.Cmd {
+	return func() tea.Msg {
+		if m.mcpClient == nil {
+			return nil
+		}
+		
+		ctx := context.Background()
+		_, err := m.mcpClient.UpdateNPCMemory(ctx, npcID, thoughts, action)
+		if err != nil && m.loggers.Debug.IsEnabled() {
+			m.loggers.Debug.Printf("Failed to update NPC memory for %s: %v", npcID, err)
+		}
+		
+		return nil
 	}
 }
 

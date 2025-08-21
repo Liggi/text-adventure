@@ -49,9 +49,11 @@ type Item struct {
 }
 
 type NPC struct {
-	Location   string   `json:"location"`
-	DebugColor string   `json:"debug_color"`
-	Inventory  []string `json:"inventory"`
+	Location      string   `json:"location"`
+	DebugColor    string   `json:"debug_color"`
+	Inventory     []string `json:"inventory"`
+	RecentThoughts []string `json:"recent_thoughts"`
+	RecentActions []string `json:"recent_actions"`
 }
 
 func NewWorldStateClient(debug bool) (*WorldStateClient, error) {
@@ -138,6 +140,31 @@ func (w *WorldStateClient) MovePlayer(ctx context.Context, location string) (str
 	}
 	if w.debug {
 		log.Printf("Move player result: %s", response)
+	}
+
+	return response, nil
+}
+
+func (w *WorldStateClient) MoveNPC(ctx context.Context, npcID, location string) (string, error) {
+	params := &mcp.CallToolParams{
+		Name: "move_npc",
+		Arguments: map[string]interface{}{
+			"npc_id":   npcID,
+			"location": location,
+		},
+	}
+
+	result, err := w.session.CallTool(ctx, params)
+	if err != nil {
+		return "", fmt.Errorf("failed to move NPC: %w", err)
+	}
+
+	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
+	if w.debug {
+		log.Printf("Move NPC result: %s", response)
 	}
 
 	return response, nil
@@ -234,6 +261,39 @@ func (w *WorldStateClient) TransferItem(ctx context.Context, item, fromLocation,
 	}
 	if w.debug {
 		log.Printf("Transfer item result: %s", response)
+	}
+
+	return response, nil
+}
+
+func (w *WorldStateClient) UpdateNPCMemory(ctx context.Context, npcID, thought, action string) (string, error) {
+	args := map[string]interface{}{
+		"npc_id": npcID,
+	}
+	
+	if thought != "" {
+		args["thought"] = thought
+	}
+	if action != "" {
+		args["action"] = action
+	}
+	
+	params := &mcp.CallToolParams{
+		Name:      "update_npc_memory",
+		Arguments: args,
+	}
+
+	result, err := w.session.CallTool(ctx, params)
+	if err != nil {
+		return "", fmt.Errorf("failed to update NPC memory: %w", err)
+	}
+
+	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
+	if w.debug {
+		log.Printf("Update NPC memory result: %s", response)
 	}
 
 	return response, nil

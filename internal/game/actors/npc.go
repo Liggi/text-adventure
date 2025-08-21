@@ -30,7 +30,7 @@ func BuildNPCWorldContextWithSenses(npcID string, world game.WorldState, sensory
 	// Add sensory events that the NPC can perceive
 	if sensoryEvents != nil && len(sensoryEvents.AuditoryEvents) > 0 {
 		npc := world.NPCs[npcID]
-		sensoryContext := "RECENT SOUNDS:\n"
+		sensoryContext := "SOUNDS THAT JUST OCCURRED:\n"
 		for _, event := range sensoryEvents.AuditoryEvents {
 			distance := sensory.CalculateRoomDistance(npc.Location, event.Location, world.Locations)
 			decayedVolume := sensory.ApplyVolumeDecay(event.Volume, distance)
@@ -77,8 +77,14 @@ func GenerateNPCThoughts(llmService *llm.Service, npcID string, world game.World
 	return func() tea.Msg {
 		worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 		
+		var recentThoughts, recentActions []string
+		if npc, exists := world.NPCs[npcID]; exists {
+			recentThoughts = npc.RecentThoughts
+			recentActions = npc.RecentActions
+		}
+		
 		req := llm.TextCompletionRequest{
-			SystemPrompt: buildThoughtsPrompt(npcID),
+			SystemPrompt: buildThoughtsPrompt(npcID, recentThoughts, recentActions),
 			UserPrompt:   worldContext,
 			MaxTokens:    150,
 		}
@@ -110,8 +116,13 @@ func GenerateNPCAction(llmService *llm.Service, npcID string, npcThoughts string
 
 	worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 	
+	var recentActions []string
+	if npc, exists := world.NPCs[npcID]; exists {
+		recentActions = npc.RecentActions
+	}
+	
 	req := llm.TextCompletionRequest{
-		SystemPrompt: buildActionPrompt(npcID, npcThoughts),
+		SystemPrompt: buildActionPrompt(npcID, npcThoughts, recentActions),
 		UserPrompt:   worldContext,
 		MaxTokens:    100,
 	}

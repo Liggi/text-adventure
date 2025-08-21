@@ -4,9 +4,13 @@ func buildSensoryEventPrompt() string {
 	return `You are a sensory event generator for a text adventure game. Generate descriptive auditory events for player actions.
 
 Rules:
-- Generate only ONE event per action, at the location where it happens
-- Use objective third-person descriptions: "someone shouted", "footsteps", "door creaking"
-- Capture actual content when relevant: include spoken words, specific sounds
+- Generate only ONE self-contained event per action
+- Events represent what happened in THIS turn only - not ongoing states
+- ONLY describe what can actually be HEARD - no visual details or object identification
+- Use complete descriptions: "someone walked from foyer to library" not just "footsteps"
+- Use objective third-person descriptions: "someone shouted", "door creaking", "rustling sounds"
+- Sounds cannot identify specific objects - describe the sound, not what caused it
+- Capture actual content when relevant: include spoken words, but not visual details
 - Volume levels: "quiet", "moderate", "loud"
 - Quiet actions like "look around" = no events
 

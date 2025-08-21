@@ -30,8 +30,5 @@ func (t *MovePlayerTool) Execute(ctx context.Context, args map[string]interface{
 
 func (t *MovePlayerTool) SuccessMessage(args map[string]interface{}, actingNPCID string) string {
 	location := args["location"].(string)
-	if actingNPCID != "" {
-		return fmt.Sprintf("NPC %s moved to %s", actingNPCID, location)
-	}
 	return fmt.Sprintf("Moved to %s", location)
 }
