@@ -12,6 +12,7 @@ import (
 	"textadventure/internal/debug"
 	"textadventure/internal/game"
 	"textadventure/internal/game/sensory"
+	"textadventure/internal/llm"
 	"textadventure/internal/logging"
 	"textadventure/internal/mcp"
 )
@@ -21,15 +22,17 @@ import (
 // world changes through MCP tools.
 type Director struct {
 	client       *openai.Client
+	llmService   *llm.Service
 	mcpClient    *mcp.WorldStateClient
 	debugLogger  *debug.Logger
 }
 
 // NewDirector creates a new Director with the required dependencies for LLM interaction,
 // world state management, and debug logging.
-func NewDirector(client *openai.Client, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger) *Director {
+func NewDirector(client *openai.Client, llmService *llm.Service, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger) *Director {
 	return &Director{
 		client:      client,
+		llmService:  llmService,
 		mcpClient:   mcpClient,
 		debugLogger: debugLogger,
 	}
@@ -200,7 +203,7 @@ func (d *Director) ProcessPlayerAction(userInput string, world game.WorldState, 
 			newWorld = mcp.MCPToGameWorldState(mcpWorld)
 		}
 		
-		sensoryEvents, err := sensory.GenerateSensoryEvents(d.client, userInput, executionResult.Successes, newWorld, d.debugLogger, npcID)
+		sensoryEvents, err := sensory.GenerateSensoryEvents(d.llmService, userInput, executionResult.Successes, newWorld, d.debugLogger, npcID)
 		if err != nil {
 			sensoryEvents = &sensory.SensoryEventResponse{AuditoryEvents: []sensory.SensoryEvent{}}
 		}

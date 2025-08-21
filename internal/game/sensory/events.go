@@ -6,10 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sashabaranov/go-openai"
-
 	"textadventure/internal/debug"
 	"textadventure/internal/game"
+	"textadventure/internal/llm"
 )
 
 // SensoryEvent represents a sensory event that occurs in the game world
@@ -26,30 +25,7 @@ type SensoryEventResponse struct {
 }
 
 // GenerateSensoryEvents generates sensory events (sounds, etc.) for player or NPC actions
-func GenerateSensoryEvents(client *openai.Client, userInput string, successfulMutations []string, world game.WorldState, debugLogger *debug.Logger, actingNPCID ...string) (*SensoryEventResponse, error) {
-	systemPrompt := `You are a sensory event generator for a text adventure game. Generate descriptive auditory events for player actions.
-
-Rules:
-- Generate only ONE event per action, at the location where it happens
-- Use objective third-person descriptions: "someone shouted", "footsteps", "door creaking"
-- Capture actual content when relevant: include spoken words, specific sounds
-- Volume levels: "quiet", "moderate", "loud"
-- Quiet actions like "look around" = no events
-
-Return JSON only:
-{
-  "auditory_events": [
-    {
-      "type": "auditory", 
-      "description": "someone shouted 'Elena, I'm here!'",
-      "location": "foyer",
-      "volume": "loud"
-    }
-  ]
-}
-
-If no sound, return empty auditory_events array.`
-
+func GenerateSensoryEvents(llmService *llm.Service, userInput string, successfulMutations []string, world game.WorldState, debugLogger *debug.Logger, actingNPCID ...string) (*SensoryEventResponse, error) {
 	var actionLabel string
 	var currentLocation string
 	
@@ -73,58 +49,22 @@ If no sound, return empty auditory_events array.`
 		contextMsg = fmt.Sprintf("%s: %s\nCurrent location: %s", actionLabel, userInput, currentLocation)
 	}
 	
-	req := openai.ChatCompletionRequest{
-		Model: "gpt-5-2025-08-07",
-		Messages: []openai.ChatCompletionMessage{
-			{
-				Role:    openai.ChatMessageRoleSystem,
-				Content: systemPrompt,
-			},
-			{
-				Role:    openai.ChatMessageRoleUser,
-				Content: contextMsg,
-			},
-		},
-		MaxCompletionTokens: 400,
-		ReasoningEffort:     "minimal",
-		ResponseFormat: &openai.ChatCompletionResponseFormat{
-			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
-		},
+	req := llm.JSONCompletionRequest{
+		SystemPrompt: buildSensoryEventPrompt(),
+		UserPrompt:   contextMsg,
+		MaxTokens:    400,
 	}
 
-	debugLogger.Printf("=== SENSORY EVENT GENERATION START ===")
-	debugLogger.Printf("Action: %q", userInput)
-	debugLogger.Printf("Context message: %s", contextMsg)
-	debugLogger.Printf("System prompt length: %d chars", len(systemPrompt))
-
-	resp, err := client.CreateChatCompletion(context.Background(), req)
+	content, err := llmService.CompleteJSON(context.Background(), req)
 	if err != nil {
-		debugLogger.Printf("SENSORY EVENT API ERROR: %v", err)
 		return nil, fmt.Errorf("sensory event generation failed: %w", err)
 	}
-
-	debugLogger.Printf("API Response - Choices length: %d", len(resp.Choices))
-	if len(resp.Choices) > 0 {
-		debugLogger.Printf("Response choice 0 - Finish reason: %s", resp.Choices[0].FinishReason)
-	}
-
+	
 	var eventResp SensoryEventResponse
-	content := resp.Choices[0].Message.Content
-	
-	debugLogger.Printf("Raw sensory event response length: %d", len(content))
-	debugLogger.Printf("Raw sensory event response: %q", content)
-	
 	if err := json.Unmarshal([]byte(content), &eventResp); err != nil {
 		debugLogger.Printf("JSON unmarshal failed: %v", err)
-		debugLogger.Printf("Returning empty sensory events response")
 		return &SensoryEventResponse{AuditoryEvents: []SensoryEvent{}}, nil
 	}
-
-	debugLogger.Printf("Generated %d sensory events", len(eventResp.AuditoryEvents))
-	for i, event := range eventResp.AuditoryEvents {
-		debugLogger.Printf("  Event %d: %s (volume: %s, location: %s)", i, event.Description, event.Volume, event.Location)
-	}
-	debugLogger.Printf("=== SENSORY EVENT GENERATION END ===")
 
 	return &eventResp, nil
 }
