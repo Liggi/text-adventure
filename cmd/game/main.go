@@ -8,10 +8,14 @@ import (
 )
 
 func main() {
-	model, err := createApp()
+	model, cleanup, err := createApp()
 	if err != nil {
 		fmt.Printf("Error initializing app: %v\n", err)
 		os.Exit(1)
+	}
+
+	if cleanup != nil {
+		defer cleanup()
 	}
 
 	p := tea.NewProgram(model, tea.WithAltScreen())

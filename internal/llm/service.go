@@ -3,15 +3,21 @@ package llm
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/sashabaranov/go-openai"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"textadventure/internal/debug"
+	"textadventure/internal/observability"
 )
 
 type Service struct {
 	client *openai.Client
 	model  string
 	debug  *debug.Logger
+	tracer trace.Tracer
 }
 
 func NewService(apiKey string, debug *debug.Logger) *Service {
@@ -19,6 +25,7 @@ func NewService(apiKey string, debug *debug.Logger) *Service {
 		client: openai.NewClient(apiKey),
 		model:  "gpt-5-2025-08-07",
 		debug:  debug,
+		tracer: otel.Tracer("llm-service"),
 	}
 }
 
@@ -41,6 +48,26 @@ type StreamCompletionRequest struct {
 }
 
 func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (string, error) {
+	ctx, span := s.tracer.Start(ctx, "llm.complete_text",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			observability.CreateGenAIAttributes("openai", s.model, 0, 0, 0.0)...,
+		),
+	)
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.Int("gen_ai.request.max_tokens", req.MaxTokens),
+		attribute.String("langfuse.observation.type", "generation"),
+	)
+
+	span.AddEvent("gen_ai.user.message", trace.WithAttributes(
+		attribute.String("gen_ai.system", "openai"),
+		attribute.String("content", req.UserPrompt),
+	))
+
+	startTime := time.Now()
+
 	openaiReq := openai.ChatCompletionRequest{
 		Model: s.model,
 		Messages: []openai.ChatCompletionMessage{
@@ -63,6 +90,8 @@ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (
 
 	resp, err := s.client.CreateChatCompletion(ctx, openaiReq)
 	if err != nil {
+		span.SetAttributes(attribute.String("error.type", "llm_completion_error"))
+		span.RecordError(err)
 		if s.debug != nil {
 			s.debug.Printf("LLM Text Completion error: %v", err)
 		}
@@ -70,18 +99,58 @@ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no completion choices returned")
+		err := fmt.Errorf("no completion choices returned")
+		span.RecordError(err)
+		return "", err
 	}
 
 	content := resp.Choices[0].Message.Content
+	duration := time.Since(startTime)
+
+	span.SetAttributes(
+		attribute.Int("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
+		attribute.Int("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
+		attribute.Int64("response_time_ms", duration.Milliseconds()),
+		attribute.String("langfuse.observation.input", req.SystemPrompt+"\n\n"+req.UserPrompt),
+		attribute.String("langfuse.observation.output", content),
+		attribute.String("langfuse.observation.model.name", s.model),
+	)
+
+	span.AddEvent("gen_ai.choice", trace.WithAttributes(
+		attribute.String("gen_ai.system", "openai"),
+		attribute.String("content", content),
+	))
+
 	if s.debug != nil {
-		s.debug.Printf("LLM Text Completion response length: %d", len(content))
+		s.debug.Printf("LLM Text Completion response length: %d, tokens: %d/%d, duration: %v", 
+			len(content), resp.Usage.PromptTokens, resp.Usage.CompletionTokens, duration)
 	}
 
 	return content, nil
 }
 
 func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (string, error) {
+	ctx, span := s.tracer.Start(ctx, "llm.complete_json",
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			observability.CreateGenAIAttributes("openai", s.model, 0, 0, 0.0)...,
+		),
+	)
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.Int("gen_ai.request.max_tokens", req.MaxTokens),
+		attribute.String("langfuse.observation.type", "generation"),
+		attribute.String("response_format", "json"),
+	)
+
+	span.AddEvent("gen_ai.user.message", trace.WithAttributes(
+		attribute.String("gen_ai.system", "openai"),
+		attribute.String("content", req.UserPrompt),
+	))
+
+	startTime := time.Now()
+
 	openaiReq := openai.ChatCompletionRequest{
 		Model: s.model,
 		Messages: []openai.ChatCompletionMessage{
@@ -107,6 +176,8 @@ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (
 
 	resp, err := s.client.CreateChatCompletion(ctx, openaiReq)
 	if err != nil {
+		span.SetAttributes(attribute.String("error.type", "llm_completion_error"))
+		span.RecordError(err)
 		if s.debug != nil {
 			s.debug.Printf("LLM JSON Completion error: %v", err)
 		}
@@ -114,12 +185,31 @@ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (
 	}
 
 	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no completion choices returned")
+		err := fmt.Errorf("no completion choices returned")
+		span.RecordError(err)
+		return "", err
 	}
 
 	content := resp.Choices[0].Message.Content
+	duration := time.Since(startTime)
+
+	span.SetAttributes(
+		attribute.Int("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
+		attribute.Int("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
+		attribute.Int64("response_time_ms", duration.Milliseconds()),
+		attribute.String("langfuse.observation.input", req.SystemPrompt+"\n\n"+req.UserPrompt),
+		attribute.String("langfuse.observation.output", content),
+		attribute.String("langfuse.observation.model.name", s.model),
+	)
+
+	span.AddEvent("gen_ai.choice", trace.WithAttributes(
+		attribute.String("gen_ai.system", "openai"),
+		attribute.String("content", content),
+	))
+
 	if s.debug != nil {
-		s.debug.Printf("LLM JSON Completion response length: %d", len(content))
+		s.debug.Printf("LLM JSON Completion response length: %d, tokens: %d/%d, duration: %v", 
+			len(content), resp.Usage.PromptTokens, resp.Usage.CompletionTokens, duration)
 	}
 
 	return content, nil
