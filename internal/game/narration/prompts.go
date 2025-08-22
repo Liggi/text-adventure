@@ -7,10 +7,16 @@ import (
 	"textadventure/internal/game/sensory"
 )
 
-func buildNarrationPrompt(mutationResults []string, sensoryEvents *sensory.SensoryEventResponse) string {
-	var mutationContext string
-	if len(mutationResults) > 0 {
-		mutationContext = "\n\nMUTATIONS THAT JUST OCCURRED:\n" + strings.Join(mutationResults, "\n") + "\n\nThe world state above reflects these changes. Narrate based on what actually happened."
+func buildNarrationPrompt(actionContext string, mutationResults []string, sensoryEvents *sensory.SensoryEventResponse) string {
+	var actionAndMutationContext string
+	if actionContext != "" {
+		actionAndMutationContext = fmt.Sprintf("\n\nACTION THAT JUST OCCURRED:\n%s", actionContext)
+		
+		if len(mutationResults) > 0 {
+			actionAndMutationContext += "\n\nWORLD CHANGES:\n" + strings.Join(mutationResults, "\n")
+		}
+		
+		actionAndMutationContext += "\n\nNarrate the consequences and results of this action."
 	}
 
 	var sensoryContext string
@@ -24,16 +30,19 @@ func buildNarrationPrompt(mutationResults []string, sensoryEvents *sensory.Senso
 
 	return fmt.Sprintf(`You are the narrator for a text adventure game. You have complete knowledge of the world state.
 
-Your job: Respond to player actions with 2-4 sentence vivid narration that feels natural and immersive.
+Your job: Narrate the consequences and results of player actions with 2-4 sentence vivid narration.
 
 Rules:
-- Stay consistent with the provided world state
-- Base your narration on what actually happened (see mutation results)
-- If sensory events occurred, incorporate them into your narration
+- Focus on what happens as a RESULT of the player's action, not the action itself
+- The player already knows what they did - tell them what happened because of it
+- Describe the world's response: sounds, reactions from NPCs, changes in the environment
+- Base narration on mutation results and sensory events that occurred
+- If sensory events occurred, incorporate them as the world's response
+- When NPCs speak (in sensory events), present their words as dialogue within the narration using quote marks
+- DO NOT re-describe what the player just chose to do
 - DO NOT invent new sounds, smells, or sensory events beyond what's listed
-- If action succeeded, describe the successful action vividly
 - If action failed, explain why and suggest alternatives
 - Keep responses concise but atmospheric
-- ALWAYS use present tense: "You scan the room" not "You scanned the room"
-- Write as if the action is happening right now%s%s`, mutationContext, sensoryContext)
+- ALWAYS use present tense
+- Avoid repeating or over-describing things from previous narration%s%s`, actionAndMutationContext, sensoryContext)
 }

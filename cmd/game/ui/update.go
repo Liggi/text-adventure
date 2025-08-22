@@ -296,8 +296,31 @@ func (m Model) handleMutationsGenerated(msg director.MutationsGeneratedMsg) (tea
 		if m.turnPhase == Narration {
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			
-			combinedEvents := &sensory.SensoryEventResponse{AuditoryEvents: m.accumulatedSensoryEvents}
-			return m, narration.StartLLMStream(m.llmService, msg.UserInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, m.loggers.Debug.IsEnabled(), msg.Successes, combinedEvents, msg.ActingNPCID)
+			// Filter sensory events for narrator to prevent duplication with action context
+			var narratorSensoryEvents []sensory.SensoryEvent
+			if msg.ActingNPCID != "" {
+				narratorSensoryEvents = m.accumulatedSensoryEvents
+			} else {
+				// Player acted: exclude sensory events from player's location to avoid "PLAYER: Hello" + "someone shouted Hello"
+				if m.loggers.Debug.IsEnabled() {
+					m.loggers.Debug.Printf("Filtering sensory events for narrator. Player location: %s", m.world.Location)
+					m.loggers.Debug.Printf("Total accumulated events: %d", len(m.accumulatedSensoryEvents))
+					for i, event := range m.accumulatedSensoryEvents {
+						m.loggers.Debug.Printf("  Event %d: %s at %s (excluding: %v)", i, event.Description, event.Location, event.Location == m.world.Location)
+					}
+				}
+				for _, event := range m.accumulatedSensoryEvents {
+					if event.Location != m.world.Location {
+						narratorSensoryEvents = append(narratorSensoryEvents, event)
+					}
+				}
+				if m.loggers.Debug.IsEnabled() {
+					m.loggers.Debug.Printf("Events passed to narrator: %d", len(narratorSensoryEvents))
+				}
+			}
+			
+			combinedEvents := &sensory.SensoryEventResponse{AuditoryEvents: narratorSensoryEvents}
+			return m, narration.StartLLMStream(m.llmService, msg.UserInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, m.loggers.Debug.IsEnabled(), msg.ActionContext, msg.Successes, combinedEvents, msg.ActingNPCID)
 		} else {
 			m.loading = false
 			

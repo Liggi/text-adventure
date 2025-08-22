@@ -34,7 +34,8 @@ WORLD_STATE_FILE = Path(__file__).parent.parent / "world_state.json"
 DEFAULT_WORLD_STATE = {
     "player": {
         "location": "foyer",
-        "inventory": []
+        "inventory": [],
+        "met_npcs": []
     },
     "locations": {
         "foyer": {
@@ -116,6 +117,7 @@ DEFAULT_WORLD_STATE = {
         "elena": {
             "location": "library",
             "debug_color": "35",
+            "description": "a woman in her thirties with dark hair pulled back, wearing a simple gray dress",
             "inventory": [],
             "recent_thoughts": [],
             "recent_actions": [],
@@ -465,6 +467,35 @@ async def configure_npc(npc_id: str, personality: str = "", backstory: str = "",
         return f"Updated {npc_id}: {', '.join(updates)}"
     else:
         return f"No configuration changes provided for {npc_id}"
+
+
+@mcp.tool()
+async def mark_npc_as_met(npc_id: str) -> str:
+    """Mark an NPC as met by the player (for narrative purposes).
+    
+    Use this when an NPC introduces themselves or the player learns their name,
+    so the narrator can refer to them by name instead of description.
+    
+    Args:
+        npc_id: The NPC ID to mark as met (e.g., "elena")
+        
+    Returns:
+        Success message or error description
+    """
+    state = load_world_state()
+    
+    if npc_id not in state.get("npcs", {}):
+        return f"Error: NPC '{npc_id}' does not exist"
+    
+    met_npcs = state["player"].get("met_npcs", [])
+    if npc_id in met_npcs:
+        return f"Player has already met {npc_id}"
+    
+    met_npcs.append(npc_id)
+    state["player"]["met_npcs"] = met_npcs
+    save_world_state(state)
+    
+    return f"Player has now met {npc_id}"
 
 
 if __name__ == "__main__":

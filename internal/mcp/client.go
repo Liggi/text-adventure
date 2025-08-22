@@ -27,6 +27,7 @@ type WorldState struct {
 type Player struct {
 	Location  string   `json:"location"`
 	Inventory []string `json:"inventory"`
+	MetNPCs   []string `json:"met_npcs"`
 }
 
 type Location struct {
@@ -51,6 +52,7 @@ type Item struct {
 type NPC struct {
 	Location      string   `json:"location"`
 	DebugColor    string   `json:"debug_color"`
+	Description   string   `json:"description"`
 	Inventory     []string `json:"inventory"`
 	RecentThoughts []string `json:"recent_thoughts"`
 	RecentActions []string `json:"recent_actions"`
@@ -356,5 +358,29 @@ func (w *WorldStateClient) ConfigureNPC(ctx context.Context, npcID, personality,
 		log.Printf("Configure NPC result: %s", response)
 	}
 
+	return response, nil
+}
+
+func (w *WorldStateClient) MarkNPCAsMetMethod(ctx context.Context, npcID string) (string, error) {
+	params := &mcp.CallToolParams{
+		Name: "mark_npc_as_met",
+		Arguments: map[string]interface{}{
+			"npc_id": npcID,
+		},
+	}
+	
+	result, err := w.session.CallTool(ctx, params)
+	if err != nil {
+		return "", fmt.Errorf("mark_npc_as_met tool call failed: %w", err)
+	}
+	
+	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
+	if w.debug {
+		log.Printf("Mark NPC as met result: %s", response)
+	}
+	
 	return response, nil
 }

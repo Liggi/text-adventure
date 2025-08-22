@@ -49,7 +49,7 @@ type StreamCompleteMsg struct {
 }
 
 // StartLLMStream initiates a streaming narration response
-func StartLLMStream(llmService *llm.Service, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, mutationResults []string, sensoryEvents *sensory.SensoryEventResponse, actingNPCID ...string) tea.Cmd {
+func StartLLMStream(llmService *llm.Service, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, actionContext string, mutationResults []string, sensoryEvents *sensory.SensoryEventResponse, actingNPCID ...string) tea.Cmd {
 	return func() tea.Msg {
 		if debug {
 			log.Printf("Starting LLM stream with input: %q", userInput)
@@ -57,7 +57,7 @@ func StartLLMStream(llmService *llm.Service, userInput string, world game.WorldS
 		
 		startTime := time.Now()
 		worldContext := game.BuildWorldContext(world, gameHistory, actingNPCID...)
-		systemPrompt := buildNarrationPrompt(mutationResults, sensoryEvents)
+		systemPrompt := buildNarrationPrompt(actionContext, mutationResults, sensoryEvents)
 		
 		req := llm.StreamCompletionRequest{
 			SystemPrompt: systemPrompt,

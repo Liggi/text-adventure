@@ -13,10 +13,12 @@ func buildDirectorPrompt(toolDescriptions string, world game.WorldState, gameHis
 	
 	if actingNPCID != "" {
 		actorInstructions = fmt.Sprintf("- For NPC picking up items: use transfer_item to move from location to %s", actingNPCID)
+		actorInstructions += fmt.Sprintf("\n- If NPC introduces themselves by name: use mark_npc_as_met with npc_id \"%s\"", actingNPCID)
 		movementInstructions = fmt.Sprintf("- For NPC movement: use move_npc tool with npc_id \"%s\"", actingNPCID)
 		exampleDestination = actingNPCID
 	} else {
 		actorInstructions = "- For picking up items: use transfer_item to move from location to player, then add_to_inventory"
+		actorInstructions += "\n- When meeting someone new who gives their name: use mark_npc_as_met with their npc_id"
 		movementInstructions = "- For player movement: use move_player tool"
 		exampleDestination = "player"
 	}

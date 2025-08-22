@@ -26,6 +26,7 @@ func init() {
 	RegisterTool(&tools.RemoveFromInventoryTool{})
 	RegisterTool(&tools.UnlockDoorTool{})
 	RegisterTool(&tools.UpdateNPCMemoryTool{})
+	RegisterTool(&tools.MarkNPCAsMetTool{})
 }
 
 func RegisterTool(tool MCPTool) {

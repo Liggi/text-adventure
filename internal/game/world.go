@@ -3,6 +3,7 @@ package game
 type WorldState struct {
 	Location  string
 	Inventory []string
+	MetNPCs   []string
 	Locations map[string]LocationInfo
 	NPCs      map[string]NPCInfo
 }
@@ -17,6 +18,7 @@ type LocationInfo struct {
 type NPCInfo struct {
 	Location      string
 	DebugColor    string
+	Description   string
 	Inventory     []string
 	RecentThoughts []string
 	RecentActions []string

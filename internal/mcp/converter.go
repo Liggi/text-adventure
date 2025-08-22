@@ -19,6 +19,7 @@ func MCPToGameWorldState(mcpWorld *WorldState) game.WorldState {
 		gameNPCs[npcID] = game.NPCInfo{
 			Location:       mcpNPC.Location,
 			DebugColor:     mcpNPC.DebugColor,
+			Description:    mcpNPC.Description,
 			Inventory:      mcpNPC.Inventory,
 			RecentThoughts: mcpNPC.RecentThoughts,
 			RecentActions:  mcpNPC.RecentActions,
@@ -31,6 +32,7 @@ func MCPToGameWorldState(mcpWorld *WorldState) game.WorldState {
 	return game.WorldState{
 		Location:  mcpWorld.Player.Location,
 		Inventory: mcpWorld.Player.Inventory,
+		MetNPCs:   mcpWorld.Player.MetNPCs,
 		Locations: gameLocations,
 		NPCs:      gameNPCs,
 	}

@@ -92,15 +92,31 @@ func BuildWorldContext(world WorldState, gameHistory []string, actingNPCID ...st
 		context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
 		context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
 		
-		// Show NPCs at player's location
+		// Show NPCs at player's location (respecting met status for narrative consistency)
 		var npcsHere []string
 		for npcID, npc := range world.NPCs {
 			if npc.Location == world.Location {
-				npcsHere = append(npcsHere, npcID)
+				met := false
+				for _, metNPC := range world.MetNPCs {
+					if metNPC == npcID {
+						met = true
+						break
+					}
+				}
+				
+				if met {
+					npcsHere = append(npcsHere, npcID)
+				} else {
+					description := npc.Description
+					if description == "" {
+						description = "someone"
+					}
+					npcsHere = append(npcsHere, description)
+				}
 			}
 		}
 		if len(npcsHere) > 0 {
-			context.WriteString(fmt.Sprintf("NPCs here: %v\n", npcsHere))
+			context.WriteString(fmt.Sprintf("People here: %v\n", npcsHere))
 		}
 	}
 	

@@ -117,6 +117,7 @@ type MutationsGeneratedMsg struct {
 	UserInput     string
 	Debug         bool
 	ActingNPCID   string
+	ActionContext string // What the actor did (for narrator context)
 }
 
 // InterpretIntent uses the LLM to understand user input and generate an action plan.
@@ -213,7 +214,7 @@ func (d *Director) ProcessPlayerAction(userInput string, world game.WorldState, 
 		}
 		
 		var allMessages []string
-		if d.debugLogger != nil {
+		if d.debugLogger != nil && d.debugLogger.IsEnabled() {
 			allMessages = append(allMessages, "[MUTATIONS]")
 			if len(executionResult.Successes) > 0 {
 				allMessages = append(allMessages, executionResult.Successes...)
@@ -228,6 +229,14 @@ func (d *Director) ProcessPlayerAction(userInput string, world game.WorldState, 
 			}
 		}
 		
+		// Create action context for narrator (what actually happened)
+		var actionContext string
+		if npcID != "" {
+			actionContext = fmt.Sprintf("%s: %s", strings.ToUpper(npcID), userInput)
+		} else {
+			actionContext = fmt.Sprintf("PLAYER: %s", userInput)
+		}
+
 		return MutationsGeneratedMsg{
 			Mutations:     allMessages,
 			Successes:     executionResult.Successes,
@@ -235,8 +244,9 @@ func (d *Director) ProcessPlayerAction(userInput string, world game.WorldState, 
 			SensoryEvents: sensoryEvents,
 			NewWorld:      newWorld,
 			UserInput:     userInput,
-			Debug:         d.debugLogger != nil,
+			Debug:         d.debugLogger.IsEnabled(),
 			ActingNPCID:   npcID,
+			ActionContext: actionContext,
 		}
 	}
 }
