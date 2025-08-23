@@ -7,46 +7,46 @@ import (
 )
 
 func buildDirectorPrompt(toolDescriptions string, world game.WorldState, gameHistory []string, actionLabel string, actingNPCID string) string {
-	var actorInstructions string
-	var movementInstructions string
-	var exampleDestination string
-	
-	if actingNPCID != "" {
-		actorInstructions = fmt.Sprintf("- For NPC picking up items: use transfer_item to move from location to %s", actingNPCID)
-		actorInstructions += fmt.Sprintf("\n- If NPC introduces themselves by name: use mark_npc_as_met with npc_id \"%s\"", actingNPCID)
-		movementInstructions = fmt.Sprintf("- For NPC movement: use move_npc tool with npc_id \"%s\"", actingNPCID)
-		exampleDestination = actingNPCID
-	} else {
-		actorInstructions = "- For picking up items: use transfer_item to move from location to player, then add_to_inventory"
-		actorInstructions += "\n- When meeting someone new who gives their name: use mark_npc_as_met with their npc_id"
-		movementInstructions = "- For player movement: use move_player tool"
-		exampleDestination = "player"
-	}
-	
-	return fmt.Sprintf(`You are the Director of a text adventure game. Your role is to understand player intent and generate the specific world mutations needed to make it happen.
+    var movementGuideline string
+    var pickupGuidelines string
+    var exampleDestination string
 
+    if actingNPCID != "" {
+        movementGuideline = fmt.Sprintf("- Movement: use move_npc with npc_id=\"%s\".", actingNPCID)
+        pickupGuidelines = fmt.Sprintf("- Pick up item: use transfer_item from location → %s.\n- If NPC introduces themselves: use mark_npc_as_met with npc_id=\"%s\".", actingNPCID, actingNPCID)
+        exampleDestination = actingNPCID
+    } else {
+        movementGuideline = "- Movement: use move_player."
+        pickupGuidelines = "- Pick up item: use transfer_item from location → player, then add_to_inventory.\n- If meeting someone who gives their name: use mark_npc_as_met with their npc_id."
+        exampleDestination = "player"
+    }
+
+    return fmt.Sprintf(`You are the Director of a text adventure game. Generate only the world mutations required to fulfill the user's intent.
+
+<available_tools>
 %s
+</available_tools>
 
-WORLD STATE CONTEXT:
+<context>
 %s
+</context>
 
-RULES:
-- Parse the %s and decide what world mutations are needed
-- Generate JSON array of mutations using the available tools
-- Be conservative - only generate mutations that directly relate to the stated action
+<guidelines>
+- Interpret the %s and produce only necessary mutations using the available tools.
+- Output strictly as a JSON object: {"mutations": [ ... ]} — no extra text.
+- Be conservative; avoid speculative or unrelated changes.
 %s
 %s
-- For dropping items: use remove_from_inventory, then transfer_item to move to current location
-- For examining/looking: usually no mutations needed
-- NPCs can only affect items at their current location or their own movement
+- Drop item: remove_from_inventory, then transfer_item to current location.
+- Examine/look: usually no mutations needed.
+- NPCs may only affect items at their location or move themselves.
+</guidelines>
 
-Return JSON format:
-{
-  "mutations": [
-    {"tool": "move_player", "args": {"location": "kitchen"}},
-    {"tool": "transfer_item", "args": {"item": "key", "from_location": "foyer", "to_location": "%s"}}
-  ]
-}
-
-If no mutations needed, return empty mutations array.`, toolDescriptions, game.BuildWorldContext(world, gameHistory, actingNPCID), actionLabel, movementInstructions, actorInstructions, exampleDestination)
+<example_output>
+{"mutations": [
+  {"tool": "move_player", "args": {"location": "kitchen"}},
+  {"tool": "transfer_item", "args": {"item": "key", "from_location": "foyer", "to_location": "%s"}}
+]}
+</example_output>
+`, toolDescriptions, game.BuildWorldContext(world, gameHistory, actingNPCID), actionLabel, movementGuideline, pickupGuidelines, exampleDestination)
 }
