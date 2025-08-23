@@ -60,6 +60,7 @@ func InitTracing(ctx context.Context, config Config) (*TracerProvider, error) {
 			sdktrace.WithMaxExportBatchSize(100),
 		),
 		sdktrace.WithResource(res),
+		sdktrace.WithSpanProcessor(sessionInjector{}),
 		// Sample all traces in development, adjust for production
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)
@@ -208,3 +209,32 @@ func CreateGenAIAttributes(system, model string, inputTokens, outputTokens int, 
 	
 	return attrs
 }
+
+type sessionInjector struct{}
+
+func (sessionInjector) OnStart(ctx context.Context, s sdktrace.ReadWriteSpan) {
+	if sid := GetSessionIDFromContext(ctx); sid != "" {
+		s.SetAttributes(
+			attribute.String("langfuse.session.id", sid),
+			attribute.String("session.id", sid),
+		)
+	}
+}
+
+type contextKey string
+const sessionIDKey contextKey = "session_id"
+
+func GetSessionIDFromContext(ctx context.Context) string {
+	if sessionID, ok := ctx.Value(sessionIDKey).(string); ok {
+		return sessionID
+	}
+	return ""
+}
+
+func GetSessionIDKey() contextKey {
+	return sessionIDKey
+}
+
+func (sessionInjector) OnEnd(s sdktrace.ReadOnlySpan) {}
+func (sessionInjector) Shutdown(context.Context) error { return nil }
+func (sessionInjector) ForceFlush(context.Context) error { return nil }

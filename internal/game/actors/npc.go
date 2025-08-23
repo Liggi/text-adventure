@@ -1,10 +1,10 @@
 package actors
 
 import (
-	"context"
-	"fmt"
-	"log"
-	"strings"
+    "context"
+    "fmt"
+    "log"
+    "strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -73,9 +73,9 @@ type NPCActionMsg struct {
 }
 
 // GenerateNPCThoughts creates a tea.Cmd that generates thoughts for an NPC
-func GenerateNPCThoughts(llmService *llm.Service, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
-	return func() tea.Msg {
-		worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
+func GenerateNPCThoughts(ctx context.Context, llmService *llm.Service, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
+    return func() tea.Msg {
+        worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 		
 		var recentThoughts, recentActions []string
 		var personality, backstory string
@@ -94,7 +94,12 @@ func GenerateNPCThoughts(llmService *llm.Service, npcID string, world game.World
 			MaxTokens:    150,
 		}
 
-		thoughts, err := llmService.CompleteText(context.Background(), req)
+        ctx = llm.WithOperationType(ctx, "npc.think")
+        ctx = llm.WithGameContext(ctx, map[string]interface{}{
+            "npc_id":   npcID,
+            "location": world.NPCs[npcID].Location,
+        })
+        thoughts, err := llmService.CompleteText(ctx, req)
 		if err != nil {
 			return NPCThoughtsMsg{
 				NPCID:    npcID,
@@ -114,7 +119,7 @@ func GenerateNPCThoughts(llmService *llm.Service, npcID string, world game.World
 }
 
 // GenerateNPCAction generates an action for an NPC based on their thoughts and world state
-func GenerateNPCAction(llmService *llm.Service, npcID string, npcThoughts string, world game.WorldState, sensoryEvents *sensory.SensoryEventResponse, debug bool) (string, error) {
+func GenerateNPCAction(ctx context.Context, llmService *llm.Service, npcID string, npcThoughts string, world game.WorldState, sensoryEvents *sensory.SensoryEventResponse, debug bool) (string, error) {
 	if npcThoughts == "" {
 		return "", nil
 	}
@@ -135,7 +140,13 @@ func GenerateNPCAction(llmService *llm.Service, npcID string, npcThoughts string
 		MaxTokens:    100,
 	}
 
-	action, err := llmService.CompleteText(context.Background(), req)
+    ctx = llm.WithOperationType(ctx, "npc.act")
+    ctx = llm.WithGameContext(ctx, map[string]interface{}{
+        "npc_id":      npcID,
+        "location":    world.NPCs[npcID].Location,
+        "has_thoughts": len(npcThoughts) > 0,
+    })
+    action, err := llmService.CompleteText(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -146,9 +157,9 @@ func GenerateNPCAction(llmService *llm.Service, npcID string, npcThoughts string
 }
 
 // GenerateNPCTurn creates a tea.Cmd that handles a complete NPC turn (thoughts + action)
-func GenerateNPCTurn(llmService *llm.Service, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
-	return func() tea.Msg {
-		thoughts := ""
+func GenerateNPCTurn(ctx context.Context, llmService *llm.Service, npcID string, world game.WorldState, gameHistory []string, debug bool, sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
+    return func() tea.Msg {
+        thoughts := ""
 		if debug {
 			worldContext := BuildNPCWorldContextWithSenses(npcID, world, sensoryEvents)
 			log.Printf("=== NPC TURN START ===")
@@ -156,18 +167,18 @@ func GenerateNPCTurn(llmService *llm.Service, npcID string, world game.WorldStat
 			log.Printf("World context length: %d chars", len(worldContext))
 		}
 
-		thoughtsMsg := GenerateNPCThoughts(llmService, npcID, world, gameHistory, debug, sensoryEvents)()
-		if msg, ok := thoughtsMsg.(NPCThoughtsMsg); ok {
-			thoughts = msg.Thoughts
-		}
+        thoughtsMsg := GenerateNPCThoughts(ctx, llmService, npcID, world, gameHistory, debug, sensoryEvents)()
+        if msg, ok := thoughtsMsg.(NPCThoughtsMsg); ok {
+            thoughts = msg.Thoughts
+        }
 
-		action, err := GenerateNPCAction(llmService, npcID, thoughts, world, sensoryEvents, debug)
-		if err != nil {
-			if debug {
-				log.Printf("Error generating action for %s: %v", npcID, err)
-			}
-			action = ""
-		}
+        action, err := GenerateNPCAction(ctx, llmService, npcID, thoughts, world, sensoryEvents, debug)
+        if err != nil {
+            if debug {
+                log.Printf("Error generating action for %s: %v", npcID, err)
+            }
+            action = ""
+        }
 
 		if debug {
 			log.Printf("NPC %s turn complete - thoughts: %q, action: %q", npcID, thoughts, action)

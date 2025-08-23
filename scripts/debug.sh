@@ -8,6 +8,12 @@ echo "This will start the MCP server in the background and then the game"
 
 > debug.log
 
+# Load tracing env if available (Langfuse + OTEL)
+if [ -f .env.tracing ]; then
+  # shellcheck disable=SC1091
+  source .env.tracing
+fi
+
 cd services/worldstate && export PATH="$HOME/.local/bin:$PATH" && uv run python world_state.py &
 echo "MCP server started"
 

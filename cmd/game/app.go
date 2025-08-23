@@ -72,6 +72,7 @@ func createApp() (ui.Model, func(), error) {
 	model := ui.NewModel(llmService, mcpClient, loggers, world)
 	
 	cleanup := func() {
+		model.Cleanup()
 		if tracerProvider != nil {
 			tracerProvider.Shutdown(context.Background())
 		}

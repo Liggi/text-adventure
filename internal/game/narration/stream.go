@@ -1,89 +1,110 @@
 package narration
 
 import (
-	"context"
-	"errors"
-	"io"
-	"log"
-	"time"
+    "context"
+    "errors"
+    "io"
+    "log"
+    "time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/sashabaranov/go-openai"
+    tea "github.com/charmbracelet/bubbletea"
+    "github.com/sashabaranov/go-openai"
 
-	"textadventure/internal/game"
-	"textadventure/internal/game/sensory"
-	"textadventure/internal/llm"
-	"textadventure/internal/logging"
+    "textadventure/internal/game"
+    "textadventure/internal/game/sensory"
+    "textadventure/internal/llm"
+    "textadventure/internal/logging"
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/trace"
 )
 
 // StreamStartedMsg represents a started narration stream
 type StreamStartedMsg struct {
-	Stream        *openai.ChatCompletionStream
-	Debug         bool
-	World         game.WorldState
-	UserInput     string
-	SystemPrompt  string
-	StartTime     time.Time
-	Logger        *logging.CompletionLogger
-	SensoryEvents *sensory.SensoryEventResponse
+    Stream        *openai.ChatCompletionStream
+    Debug         bool
+    World         game.WorldState
+    UserInput     string
+    SystemPrompt  string
+    StartTime     time.Time
+    Logger        *logging.CompletionLogger
+    SensoryEvents *sensory.SensoryEventResponse
+    Span          trace.Span
 }
 
 // StreamChunkMsg represents a chunk from the narration stream
 type StreamChunkMsg struct {
-	Chunk         string
-	Stream        *openai.ChatCompletionStream
-	Debug         bool
-	CompletionCtx *StreamStartedMsg
+    Chunk         string
+    Stream        *openai.ChatCompletionStream
+    Debug         bool
+    CompletionCtx *StreamStartedMsg
 }
 
 // StreamCompleteMsg represents completion of narration stream
 type StreamCompleteMsg struct {
-	World         game.WorldState
-	UserInput     string
-	SystemPrompt  string
-	Response      string
-	StartTime     time.Time
-	Logger        *logging.CompletionLogger
-	Debug         bool
-	SensoryEvents *sensory.SensoryEventResponse
+    World         game.WorldState
+    UserInput     string
+    SystemPrompt  string
+    Response      string
+    StartTime     time.Time
+    Logger        *logging.CompletionLogger
+    Debug         bool
+    SensoryEvents *sensory.SensoryEventResponse
+    Span          trace.Span
 }
 
 // StartLLMStream initiates a streaming narration response
-func StartLLMStream(llmService *llm.Service, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, actionContext string, mutationResults []string, sensoryEvents *sensory.SensoryEventResponse, actingNPCID ...string) tea.Cmd {
-	return func() tea.Msg {
-		if debug {
-			log.Printf("Starting LLM stream with input: %q", userInput)
-		}
-		
-		startTime := time.Now()
-		worldContext := game.BuildWorldContext(world, gameHistory, actingNPCID...)
-		systemPrompt := buildNarrationPrompt(actionContext, mutationResults, sensoryEvents)
-		
-		req := llm.StreamCompletionRequest{
-			SystemPrompt: systemPrompt,
-			UserPrompt:   worldContext + "PLAYER ACTION: " + userInput,
-			MaxTokens:    200,
-		}
-		
-		stream, err := llmService.CompleteStream(context.Background(), req)
-		if err != nil {
-			if debug {
-				log.Printf("Stream creation error: %v", err)
-			}
-			return StreamErrorMsg{Response: "", Err: err}
-		}
-		
-		return StreamStartedMsg{
-			Stream:        stream,
-			Debug:         debug,
-			World:         world,
-			UserInput:     userInput,
-			SystemPrompt:  systemPrompt,
-			StartTime:     startTime,
-			Logger:        logger,
-			SensoryEvents: sensoryEvents,
-		}
-	}
+func StartLLMStream(ctx context.Context, llmService *llm.Service, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, actionContext string, mutationResults []string, sensoryEvents *sensory.SensoryEventResponse, actingNPCID ...string) tea.Cmd {
+    return func() tea.Msg {
+        if debug {
+            log.Printf("Starting LLM stream with input: %q", userInput)
+        }
+        
+        startTime := time.Now()
+        worldContext := game.BuildWorldContext(world, gameHistory, actingNPCID...)
+        systemPrompt := buildNarrationPrompt(actionContext, mutationResults, sensoryEvents)
+        
+        req := llm.StreamCompletionRequest{
+            SystemPrompt: systemPrompt,
+            UserPrompt:   worldContext + "PLAYER ACTION: " + userInput,
+            MaxTokens:    200,
+        }
+        // Create narration span as a generation observation
+        tracer := otel.Tracer("narration")
+        ctx, span := tracer.Start(ctx, "narration.generate",
+            trace.WithSpanKind(trace.SpanKindClient),
+        )
+        span.SetAttributes(
+            attribute.String("langfuse.observation.type", "generation"),
+            attribute.Int("gen_ai.request.max_tokens", req.MaxTokens),
+            attribute.String("langfuse.observation.input", req.SystemPrompt+"\n\n"+req.UserPrompt),
+            attribute.String("langfuse.observation.output_format", "text"),
+        )
+        // Attach session/game context (turn id/index/phase, location, etc.)
+        llm.CopyGameContextToSpan(ctx, span)
+
+        stream, err := llmService.CompleteStream(ctx, req)
+        if err != nil {
+            if debug {
+                log.Printf("Stream creation error: %v", err)
+            }
+            span.RecordError(err)
+            span.End()
+            return StreamErrorMsg{Response: "", Err: err}
+        }
+        
+        return StreamStartedMsg{
+            Stream:        stream,
+            Debug:         debug,
+            World:         world,
+            UserInput:     userInput,
+            SystemPrompt:  systemPrompt,
+            StartTime:     startTime,
+            Logger:        logger,
+            SensoryEvents: sensoryEvents,
+            Span:          span,
+        }
+    }
 }
 
 // ReadNextChunk reads the next chunk from the narration stream
@@ -109,17 +130,18 @@ func ReadNextChunk(stream *openai.ChatCompletionStream, debug bool, completionCt
 				log.Printf("Failed to log completion: %v", logErr)
 			}
 			
-			return StreamCompleteMsg{
-				World:         completionCtx.World,
-				UserInput:     completionCtx.UserInput,
-				SystemPrompt:  completionCtx.SystemPrompt,
-				Response:      fullResponse,
-				StartTime:     completionCtx.StartTime,
-				Logger:        completionCtx.Logger,
-				Debug:         debug,
-				SensoryEvents: completionCtx.SensoryEvents,
-			}
-		}
+            return StreamCompleteMsg{
+                World:         completionCtx.World,
+                UserInput:     completionCtx.UserInput,
+                SystemPrompt:  completionCtx.SystemPrompt,
+                Response:      fullResponse,
+                StartTime:     completionCtx.StartTime,
+                Logger:        completionCtx.Logger,
+                Debug:         debug,
+                SensoryEvents: completionCtx.SensoryEvents,
+                Span:          completionCtx.Span,
+            }
+        }
 		
 		if err != nil {
 			if debug {
@@ -146,4 +168,3 @@ type StreamErrorMsg struct {
 	Response string
 	Err      error
 }
-

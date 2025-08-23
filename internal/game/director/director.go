@@ -1,19 +1,22 @@
 package director
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"strings"
+    "context"
+    "encoding/json"
+    "fmt"
+    "strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+    tea "github.com/charmbracelet/bubbletea"
 
-	"textadventure/internal/debug"
-	"textadventure/internal/game"
-	"textadventure/internal/game/sensory"
-	"textadventure/internal/llm"
-	"textadventure/internal/logging"
-	"textadventure/internal/mcp"
+    "textadventure/internal/debug"
+    "textadventure/internal/game"
+    "textadventure/internal/game/sensory"
+    "textadventure/internal/llm"
+    "textadventure/internal/logging"
+    "textadventure/internal/mcp"
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/trace"
 )
 
 // Director orchestrates LLM-driven world state mutations in the text adventure game.
@@ -80,14 +83,17 @@ func (b *IntentBuilder) WithLogger(logger *logging.CompletionLogger) *IntentBuil
 	return b
 }
 
-// Execute processes the configured intent and returns a Bubble Tea command.
-// Panics if WithWorld() was not called.
 func (b *IntentBuilder) Execute() tea.Cmd {
+	return b.ExecuteWithContext(context.Background())
+}
+
+func (b *IntentBuilder) ExecuteWithContext(ctx context.Context) tea.Cmd {
 	if b.world == nil {
 		panic("world state required - call WithWorld() before Execute()")
 	}
 	
-	return b.director.ProcessPlayerAction(
+	return b.director.ProcessPlayerActionWithContext(
+		ctx,
 		b.intent,
 		*b.world,
 		b.history,
@@ -123,10 +129,8 @@ type MutationsGeneratedMsg struct {
 // InterpretIntent uses the LLM to understand user input and generate an action plan.
 // It analyzes the user's intent in the context of the current world state and returns
 // a plan containing the specific MCP tool mutations needed to fulfill that intent.
-func (d *Director) InterpretIntent(userInput string, world game.WorldState, gameHistory []string, actingNPCID string) (*ActionPlan, error) {
-	ctx := context.Background()
-	
-	toolDescriptions, err := d.mcpClient.ListTools(ctx)
+func (d *Director) InterpretIntent(ctx context.Context, userInput string, world game.WorldState, gameHistory []string, actingNPCID string) (*ActionPlan, error) {
+    toolDescriptions, err := d.mcpClient.ListTools(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tool descriptions from MCP server: %w", err)
 	}
@@ -139,7 +143,7 @@ func (d *Director) InterpretIntent(userInput string, world game.WorldState, game
 		MaxTokens:    400,
 	}
 
-	content, err := d.llmService.CompleteJSON(ctx, req)
+    content, err := d.llmService.CompleteJSON(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("mutation generation failed: %w", err)
 	}
@@ -161,7 +165,7 @@ func (d *Director) InterpretIntent(userInput string, world game.WorldState, game
 // ExecuteIntent interprets user input and executes the resulting action plan with retry logic.
 // It combines intent interpretation with mutation execution, handling failures gracefully.
 func (d *Director) ExecuteIntent(ctx context.Context, userInput string, world game.WorldState, gameHistory []string, actingNPCID string) (*ExecutionResult, error) {
-	actionPlan, err := d.InterpretIntent(userInput, world, gameHistory, actingNPCID)
+    actionPlan, err := d.InterpretIntent(ctx, userInput, world, gameHistory, actingNPCID)
 	if err != nil {
 		return &ExecutionResult{}, fmt.Errorf("failed to generate mutations: %w", err)
 	}
@@ -173,40 +177,52 @@ func (d *Director) ExecuteIntent(ctx context.Context, userInput string, world ga
 	return d.executeWithRetry(ctx, userInput, world, gameHistory, actingNPCID, actionPlan.Mutations)
 }
 
-// ProcessPlayerAction is the main entry point for processing user actions.
-// It handles the complete flow from intent interpretation through world state updates
-// and sensory event generation, returning a Bubble Tea message.
 func (d *Director) ProcessPlayerAction(userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, actingNPCID ...string) tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-		
-		var npcID string
-		if len(actingNPCID) > 0 {
-			npcID = actingNPCID[0]
-		}
-		
-		executionResult, err := d.ExecuteIntent(ctx, userInput, world, gameHistory, npcID)
-		if err != nil {
-			executionResult = &ExecutionResult{
-				Successes: []string{},
-				Failures:  []string{fmt.Sprintf("Failed to process action: %v", err)},
-			}
-		}
-		
-		mcpWorld, err := d.mcpClient.GetWorldState(ctx)
-		var newWorld game.WorldState
-		if err != nil {
-			newWorld = world
-		} else {
-			newWorld = mcp.MCPToGameWorldState(mcpWorld)
-		}
-		
-		sensoryEvents, err := sensory.GenerateSensoryEvents(d.llmService, userInput, executionResult.Successes, newWorld, d.debugLogger, npcID)
-		if err != nil {
-			sensoryEvents = &sensory.SensoryEventResponse{AuditoryEvents: []sensory.SensoryEvent{}}
-		}
-		
-		if d.debugLogger != nil && len(sensoryEvents.AuditoryEvents) > 0 {
+	ctx := context.Background()
+	return d.ProcessPlayerActionWithContext(ctx, userInput, world, gameHistory, logger, actingNPCID...)
+}
+
+func (d *Director) ProcessPlayerActionWithContext(ctx context.Context, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, actingNPCID ...string) tea.Cmd {
+    return func() tea.Msg {
+        tracer := otel.Tracer("director")
+        ctx, span := tracer.Start(ctx, "director.handle_action",
+            trace.WithAttributes(
+                attribute.String("user.input", userInput),
+            ),
+        )
+        // Attach session/turn/game context to the wrapper span
+        llm.CopyGameContextToSpan(ctx, span)
+        defer span.End()
+        var npcID string
+        if len(actingNPCID) > 0 {
+            npcID = actingNPCID[0]
+        }
+        if npcID != "" {
+            span.SetAttributes(attribute.String("acting_npc", npcID))
+        }
+        executionResult, err := d.ExecuteIntent(ctx, userInput, world, gameHistory, npcID)
+        if err != nil {
+            executionResult = &ExecutionResult{
+                Successes: []string{},
+                Failures:  []string{fmt.Sprintf("Failed to process action: %v", err)},
+            }
+            span.RecordError(err)
+        }
+        
+        mcpWorld, err := d.mcpClient.GetWorldState(ctx)
+        var newWorld game.WorldState
+        if err != nil {
+            newWorld = world
+        } else {
+            newWorld = mcp.MCPToGameWorldState(mcpWorld)
+        }
+        
+        sensoryEvents, err := sensory.GenerateSensoryEvents(ctx, d.llmService, userInput, executionResult.Successes, newWorld, d.debugLogger, npcID)
+        if err != nil {
+            sensoryEvents = &sensory.SensoryEventResponse{AuditoryEvents: []sensory.SensoryEvent{}}
+        }
+        
+        if d.debugLogger != nil && len(sensoryEvents.AuditoryEvents) > 0 {
 			d.debugLogger.Printf("=== SENSORY EVENTS GENERATED ===")
 			for _, event := range sensoryEvents.AuditoryEvents {
 				d.debugLogger.Printf("🔊 %s (%s) at %s", event.Description, event.Volume, event.Location)
@@ -227,28 +243,33 @@ func (d *Director) ProcessPlayerAction(userInput string, world game.WorldState, 
 			if len(executionResult.Successes) == 0 && len(executionResult.Failures) == 0 {
 				allMessages = append(allMessages, "No mutations needed")
 			}
-		}
-		
-		// Create action context for narrator (what actually happened)
-		var actionContext string
-		if npcID != "" {
-			actionContext = fmt.Sprintf("%s: %s", strings.ToUpper(npcID), userInput)
-		} else {
-			actionContext = fmt.Sprintf("PLAYER: %s", userInput)
-		}
+        }
 
-		return MutationsGeneratedMsg{
-			Mutations:     allMessages,
-			Successes:     executionResult.Successes,
-			Failures:      executionResult.Failures,
-			SensoryEvents: sensoryEvents,
-			NewWorld:      newWorld,
-			UserInput:     userInput,
-			Debug:         d.debugLogger.IsEnabled(),
-			ActingNPCID:   npcID,
-			ActionContext: actionContext,
-		}
-	}
+        // Create action context for narrator (what actually happened)
+        var actionContext string
+        if npcID != "" {
+            actionContext = fmt.Sprintf("%s: %s", strings.ToUpper(npcID), userInput)
+        } else {
+            actionContext = fmt.Sprintf("PLAYER: %s", userInput)
+        }
+
+        span.SetAttributes(
+            attribute.Int("result.success_count", len(executionResult.Successes)),
+            attribute.Int("result.failure_count", len(executionResult.Failures)),
+        )
+
+        return MutationsGeneratedMsg{
+            Mutations:     allMessages,
+            Successes:     executionResult.Successes,
+            Failures:      executionResult.Failures,
+            SensoryEvents: sensoryEvents,
+            NewWorld:      newWorld,
+            UserInput:     userInput,
+            Debug:         d.debugLogger.IsEnabled(),
+            ActingNPCID:   npcID,
+            ActionContext: actionContext,
+        }
+    }
 }
 
 // executeWithRetry handles mutation execution with automatic retry on failures.
@@ -272,7 +293,7 @@ func (d *Director) executeWithRetry(ctx context.Context, userInput string, world
 			retryPrompt := fmt.Sprintf("Previous attempt failed with errors: %s. Please try a different approach for: %s", 
 				strings.Join(failures, "; "), userInput)
 			
-			retryResp, err := d.InterpretIntent(retryPrompt, world, gameHistory, actingNPCID)
+            retryResp, err := d.InterpretIntent(ctx, retryPrompt, world, gameHistory, actingNPCID)
 			if err != nil {
 				break
 			}
@@ -293,4 +314,3 @@ func getActionLabel(actingNPCID string) string {
 	}
 	return "Player action"
 }
-

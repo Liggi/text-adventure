@@ -1,14 +1,14 @@
 package sensory
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"strings"
+    "context"
+    "encoding/json"
+    "fmt"
+    "strings"
 
-	"textadventure/internal/debug"
-	"textadventure/internal/game"
-	"textadventure/internal/llm"
+    "textadventure/internal/debug"
+    "textadventure/internal/game"
+    "textadventure/internal/llm"
 )
 
 // SensoryEvent represents a sensory event that occurs in the game world
@@ -25,7 +25,7 @@ type SensoryEventResponse struct {
 }
 
 // GenerateSensoryEvents generates sensory events (sounds, etc.) for player or NPC actions
-func GenerateSensoryEvents(llmService *llm.Service, userInput string, successfulMutations []string, world game.WorldState, debugLogger *debug.Logger, actingNPCID ...string) (*SensoryEventResponse, error) {
+func GenerateSensoryEvents(ctx context.Context, llmService *llm.Service, userInput string, successfulMutations []string, world game.WorldState, debugLogger *debug.Logger, actingNPCID ...string) (*SensoryEventResponse, error) {
 	var actionLabel string
 	var currentLocation string
 	
@@ -55,7 +55,12 @@ func GenerateSensoryEvents(llmService *llm.Service, userInput string, successful
 		MaxTokens:    400,
 	}
 
-	content, err := llmService.CompleteJSON(context.Background(), req)
+    ctx = llm.WithOperationType(ctx, "sensory.generate")
+    ctx = llm.WithGameContext(ctx, map[string]interface{}{
+        "player_location": world.Location,
+        "mutation_count":  len(successfulMutations),
+    })
+    content, err := llmService.CompleteJSON(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("sensory event generation failed: %w", err)
 	}

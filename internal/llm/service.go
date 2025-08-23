@@ -13,6 +13,15 @@ import (
 	"textadventure/internal/observability"
 )
 
+// Context keys for operation tracing
+type contextKey string
+
+const (
+	operationTypeKey contextKey = "operation_type"
+	gameContextKey   contextKey = "game_context"
+	sessionIDKey     contextKey = "session_id"
+)
+
 type Service struct {
 	client *openai.Client
 	model  string
@@ -48,18 +57,59 @@ type StreamCompletionRequest struct {
 }
 
 func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (string, error) {
-	ctx, span := s.tracer.Start(ctx, "llm.complete_text",
-		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(
-			observability.CreateGenAIAttributes("openai", s.model, 0, 0, 0.0)...,
-		),
-	)
+    operationType := "text_completion"
+    if opType := getOperationType(ctx); opType != "" {
+        operationType = opType
+    }
+	
+	sc := trace.SpanFromContext(ctx).SpanContext()
+	if s.debug != nil {
+		if !sc.IsValid() {
+			s.debug.Printf("NO PARENT: ctx missing active span for %s", operationType)
+		} else {
+			s.debug.Printf("CompleteText trace=%s parentSpan=%s op=%s", sc.TraceID(), sc.SpanID(), operationType)
+		}
+	}
+	
+    spanName := operationType
+    if spanName == "" {
+        spanName = "llm.complete_text"
+    }
+    ctx, span := s.tracer.Start(ctx, spanName,
+        trace.WithSpanKind(trace.SpanKindClient),
+        trace.WithAttributes(
+            observability.CreateGenAIAttributes("openai", s.model, 0, 0, 0.0)...,
+        ),
+    )
 	defer span.End()
 
-	span.SetAttributes(
+	attrs := []attribute.KeyValue{
 		attribute.Int("gen_ai.request.max_tokens", req.MaxTokens),
 		attribute.String("langfuse.observation.type", "generation"),
-	)
+		attribute.String("game.operation_type", operationType),
+	}
+	
+	if sessionID := getSessionID(ctx); sessionID != "" {
+		attrs = append(attrs, 
+			attribute.String("langfuse.session.id", sessionID),
+			attribute.String("session.id", sessionID),
+		)
+	}
+	
+	if gameCtx := getGameContext(ctx); gameCtx != nil {
+		for k, v := range gameCtx {
+			switch val := v.(type) {
+			case string:
+				attrs = append(attrs, attribute.String("game."+k, val))
+			case int:
+				attrs = append(attrs, attribute.Int("game."+k, val))
+			case []string:
+				attrs = append(attrs, attribute.StringSlice("game."+k, val))
+			}
+		}
+	}
+	
+	span.SetAttributes(attrs...)
 
 	span.AddEvent("gen_ai.user.message", trace.WithAttributes(
 		attribute.String("gen_ai.system", "openai"),
@@ -107,14 +157,15 @@ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (
 	content := resp.Choices[0].Message.Content
 	duration := time.Since(startTime)
 
-	span.SetAttributes(
-		attribute.Int("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
-		attribute.Int("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
-		attribute.Int64("response_time_ms", duration.Milliseconds()),
-		attribute.String("langfuse.observation.input", req.SystemPrompt+"\n\n"+req.UserPrompt),
-		attribute.String("langfuse.observation.output", content),
-		attribute.String("langfuse.observation.model.name", s.model),
-	)
+    span.SetAttributes(
+        attribute.Int("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
+        attribute.Int("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
+        attribute.Int64("response_time_ms", duration.Milliseconds()),
+        attribute.String("langfuse.observation.input", req.SystemPrompt+"\n\n"+req.UserPrompt),
+        attribute.String("langfuse.observation.output", content),
+        attribute.String("langfuse.observation.output_format", "text"),
+        attribute.String("langfuse.observation.model.name", s.model),
+    )
 
 	span.AddEvent("gen_ai.choice", trace.WithAttributes(
 		attribute.String("gen_ai.system", "openai"),
@@ -130,19 +181,60 @@ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (
 }
 
 func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (string, error) {
-	ctx, span := s.tracer.Start(ctx, "llm.complete_json",
-		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(
-			observability.CreateGenAIAttributes("openai", s.model, 0, 0, 0.0)...,
-		),
-	)
+    operationType := "json_completion"
+    if opType := getOperationType(ctx); opType != "" {
+        operationType = opType
+    }
+	
+	sc := trace.SpanFromContext(ctx).SpanContext()
+	if s.debug != nil {
+		if !sc.IsValid() {
+			s.debug.Printf("NO PARENT: ctx missing active span for %s", operationType)
+		} else {
+			s.debug.Printf("CompleteJSON trace=%s parentSpan=%s op=%s", sc.TraceID(), sc.SpanID(), operationType)
+		}
+	}
+	
+    spanName := operationType
+    if spanName == "" {
+        spanName = "llm.complete_json"
+    }
+    ctx, span := s.tracer.Start(ctx, spanName,
+        trace.WithSpanKind(trace.SpanKindClient),
+        trace.WithAttributes(
+            observability.CreateGenAIAttributes("openai", s.model, 0, 0, 0.0)...,
+        ),
+    )
 	defer span.End()
 
-	span.SetAttributes(
+	attrs := []attribute.KeyValue{
 		attribute.Int("gen_ai.request.max_tokens", req.MaxTokens),
 		attribute.String("langfuse.observation.type", "generation"),
 		attribute.String("response_format", "json"),
-	)
+		attribute.String("game.operation_type", operationType),
+	}
+	
+	if sessionID := getSessionID(ctx); sessionID != "" {
+		attrs = append(attrs, 
+			attribute.String("langfuse.session.id", sessionID),
+			attribute.String("session.id", sessionID),
+		)
+	}
+	
+	if gameCtx := getGameContext(ctx); gameCtx != nil {
+		for k, v := range gameCtx {
+			switch val := v.(type) {
+			case string:
+				attrs = append(attrs, attribute.String("game."+k, val))
+			case int:
+				attrs = append(attrs, attribute.Int("game."+k, val))
+			case []string:
+				attrs = append(attrs, attribute.StringSlice("game."+k, val))
+			}
+		}
+	}
+	
+	span.SetAttributes(attrs...)
 
 	span.AddEvent("gen_ai.user.message", trace.WithAttributes(
 		attribute.String("gen_ai.system", "openai"),
@@ -193,14 +285,15 @@ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (
 	content := resp.Choices[0].Message.Content
 	duration := time.Since(startTime)
 
-	span.SetAttributes(
-		attribute.Int("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
-		attribute.Int("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
-		attribute.Int64("response_time_ms", duration.Milliseconds()),
-		attribute.String("langfuse.observation.input", req.SystemPrompt+"\n\n"+req.UserPrompt),
-		attribute.String("langfuse.observation.output", content),
-		attribute.String("langfuse.observation.model.name", s.model),
-	)
+    span.SetAttributes(
+        attribute.Int("gen_ai.usage.input_tokens", resp.Usage.PromptTokens),
+        attribute.Int("gen_ai.usage.output_tokens", resp.Usage.CompletionTokens),
+        attribute.Int64("response_time_ms", duration.Milliseconds()),
+        attribute.String("langfuse.observation.input", req.SystemPrompt+"\n\n"+req.UserPrompt),
+        attribute.String("langfuse.observation.output", content),
+        attribute.String("langfuse.observation.output_format", "json"),
+        attribute.String("langfuse.observation.model.name", s.model),
+    )
 
 	span.AddEvent("gen_ai.choice", trace.WithAttributes(
 		attribute.String("gen_ai.system", "openai"),
@@ -213,6 +306,72 @@ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (
 	}
 
 	return content, nil
+}
+
+func WithOperationType(ctx context.Context, opType string) context.Context {
+	return context.WithValue(ctx, operationTypeKey, opType)
+}
+
+func WithGameContext(ctx context.Context, gameCtx map[string]interface{}) context.Context {
+    // Merge with any existing game context instead of overwriting
+    if existing, ok := ctx.Value(gameContextKey).(map[string]interface{}); ok && existing != nil {
+        merged := make(map[string]interface{}, len(existing)+len(gameCtx))
+        for k, v := range existing {
+            merged[k] = v
+        }
+        for k, v := range gameCtx {
+            merged[k] = v
+        }
+        return context.WithValue(ctx, gameContextKey, merged)
+    }
+    return context.WithValue(ctx, gameContextKey, gameCtx)
+}
+
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, observability.GetSessionIDKey(), sessionID)
+}
+
+func getOperationType(ctx context.Context) string {
+	if opType, ok := ctx.Value(operationTypeKey).(string); ok {
+		return opType
+	}
+	return ""
+}
+
+func getGameContext(ctx context.Context) map[string]interface{} {
+	if gameCtx, ok := ctx.Value(gameContextKey).(map[string]interface{}); ok {
+		return gameCtx
+	}
+	return nil
+}
+
+func getSessionID(ctx context.Context) string {
+    return observability.GetSessionIDFromContext(ctx)
+}
+
+// CopyGameContextToSpan attaches game context and session id attributes to an existing span.
+func CopyGameContextToSpan(ctx context.Context, span trace.Span) {
+    if span == nil {
+        return
+    }
+    if sid := getSessionID(ctx); sid != "" {
+        span.SetAttributes(
+            attribute.String("langfuse.session.id", sid),
+            attribute.String("session.id", sid),
+        )
+    }
+    if gameCtx := getGameContext(ctx); gameCtx != nil {
+        for k, v := range gameCtx {
+            switch val := v.(type) {
+            case string:
+                span.SetAttributes(attribute.String("game."+k, val))
+            case int:
+                span.SetAttributes(attribute.Int("game."+k, val))
+            case []string:
+                span.SetAttributes(attribute.StringSlice("game."+k, val))
+            }
+        }
+    }
 }
 
 func (s *Service) CompleteStream(ctx context.Context, req StreamCompletionRequest) (*openai.ChatCompletionStream, error) {
