@@ -63,10 +63,11 @@ Narration: %s%s
 Extract permanent canonical facts about this location:`, locationID, narrationText, existingFactsSection)
 
 	req := llm.JSONCompletionRequest{
-		SystemPrompt: systemPrompt,
-		UserPrompt:   userPrompt,
-		MaxTokens:    150,
-		Model:        "gpt-5-mini",
+		SystemPrompt:    systemPrompt,
+		UserPrompt:      userPrompt,
+		MaxTokens:       2000,
+		Model:           "gpt-5-mini",
+		ReasoningEffort: "minimal",
 	}
 
 	ctx = llm.WithOperationType(ctx, "facts.extract")

@@ -37,9 +37,11 @@ func AttributeFacts(ctx context.Context, llmService *llm.Service, extractedFacts
 	userPrompt := fmt.Sprintf("Attribute these extracted facts: %s", strings.Join(extractedFacts, ", "))
 
 	response, err := llmService.CompleteJSON(ctx, llm.JSONCompletionRequest{
-		SystemPrompt: systemPrompt,
-		UserPrompt:   userPrompt,
-		MaxTokens:    300,
+		SystemPrompt:    systemPrompt,
+		UserPrompt:      userPrompt,
+		MaxTokens:       2000,
+		Model:           "gpt-5-mini",
+		ReasoningEffort: "minimal",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("LLM attribution failed: %w", err)

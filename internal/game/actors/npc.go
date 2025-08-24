@@ -76,9 +76,11 @@ func GenerateNPCThoughts(ctx context.Context, llmService *llm.Service, npcID str
 		}
 		
         req := llm.TextCompletionRequest{
-            SystemPrompt: buildThoughtsPromptXML(npcID, recentThoughts, recentActions, personality, backstory, coreMemories),
-            UserPrompt:   buildNPCThoughtsUserXML(worldContext, perceivedLines, situation),
-            MaxTokens:    150,
+            SystemPrompt:    buildThoughtsPromptXML(npcID, recentThoughts, recentActions, personality, backstory, coreMemories),
+            UserPrompt:      buildNPCThoughtsUserXML(worldContext, perceivedLines, situation),
+            MaxTokens:       2000,
+            Model:           "gpt-5-mini",
+            ReasoningEffort: "minimal",
         }
 
         ctx = llm.WithOperationType(ctx, "npc.think")
@@ -122,9 +124,11 @@ func GenerateNPCAction(ctx context.Context, llmService *llm.Service, npcID strin
 	}
 	
 	req := llm.TextCompletionRequest{
-		SystemPrompt: buildActionPrompt(npcID, npcThoughts, recentActions, personality, backstory),
-		UserPrompt:   worldContext,
-		MaxTokens:    100,
+		SystemPrompt:    buildActionPrompt(npcID, npcThoughts, recentActions, personality, backstory),
+		UserPrompt:      worldContext,
+		MaxTokens:       2000,
+		Model:           "gpt-5-mini",
+		ReasoningEffort: "minimal",
 	}
 
     ctx = llm.WithOperationType(ctx, "npc.act")
@@ -158,7 +162,7 @@ func GenerateNPCTurn(ctx context.Context, llmService *llm.Service, npcID string,
         // LLM-driven perception per NPC
         tracer := otel.Tracer("perception")
         pctx, pspan := tracer.Start(ctx, "perception.llm")
-        perceivedLines, perr := perception.GeneratePerceivedEventsForNPC(pctx, llmService, npcID, world, worldEventLines)
+        perceivedLines, perr := perception.GeneratePerceivedEventsForNPC(pctx, llmService, npcID, world, worldEventLines, debug)
         if perr != nil && debug {
             log.Printf("[ERROR] Perception error for %s: %v", npcID, perr)
         }
@@ -186,12 +190,13 @@ func GenerateNPCTurn(ctx context.Context, llmService *llm.Service, npcID string,
             sctx, sspan := otel.Tracer("perception").Start(ctx, "perception.situation")
             s := buildNPCSituationUser(game.BuildWorldContext(world, []string{}, npcID), perceivedLines)
             req := llm.TextCompletionRequest{
-                SystemPrompt: `Summarize the immediate situation in 1-2 short sentences in present tense.
+                SystemPrompt:    `Summarize the immediate situation in 1-2 short sentences in present tense.
 Use only the provided world_context and perceived_events.
 Be concrete and neutral. No invention beyond those details.`,
-                UserPrompt:   s,
-                MaxTokens:    60,
-                Model:        "gpt-5-mini",
+                UserPrompt:      s,
+                MaxTokens:       1000,
+                Model:           "gpt-5-mini",
+                ReasoningEffort: "minimal",
             }
             sctx = llm.WithOperationType(sctx, "npc.situation")
             out, serr := llmService.CompleteText(sctx, req)

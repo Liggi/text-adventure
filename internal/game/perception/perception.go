@@ -4,6 +4,7 @@ import (
     "context"
     "encoding/json"
     "fmt"
+    "log"
     "strings"
 
     "textadventure/internal/game"
@@ -13,7 +14,7 @@ import (
 // GeneratePerceivedEventsForNPC asks the LLM to select which of the given
 // world event lines this NPC would reasonably perceive, given the current world state.
 // Returns a slice of lines (subset of input), with no inventions.
-func GeneratePerceivedEventsForNPC(ctx context.Context, llmService *llm.Service, npcID string, world game.WorldState, worldEventLines []string) ([]string, error) {
+func GeneratePerceivedEventsForNPC(ctx context.Context, llmService *llm.Service, npcID string, world game.WorldState, worldEventLines []string, debug bool) ([]string, error) {
     if len(worldEventLines) == 0 {
         return []string{}, nil
     }
@@ -25,59 +26,60 @@ func GeneratePerceivedEventsForNPC(ctx context.Context, llmService *llm.Service,
     fmt.Fprintf(sb, "WORLD SNAPSHOT (for reasoning):\n%s\n\n", worldCtx)
     fmt.Fprintf(sb, "EVENT LINES:\n%s\n", strings.Join(worldEventLines, "\n"))
 
-    req := llm.JSONCompletionRequest{
-        SystemPrompt: `You decide what an NPC perceives in a text adventure.
+    schema := map[string]interface{}{
+        "type": "object",
+        "properties": map[string]interface{}{
+            "events": map[string]interface{}{
+                "type": "array",
+                "items": map[string]interface{}{
+                    "type": "string",
+                },
+                "description": "Array of perceived event strings",
+            },
+        },
+        "required": []string{"events"},
+        "additionalProperties": false,
+    }
+
+    req := llm.JSONSchemaCompletionRequest{
+        SystemPrompt:    `You decide what an NPC perceives in a text adventure.
 Given a world snapshot and a list of canonical event lines from this turn, select only the lines the NPC could plausibly perceive.
 Rules:
-- Only return a JSON array of strings, strictly chosen from the provided event lines.
+- Return a JSON object with an "events" array containing strings strictly chosen from the provided event lines.
 - Do not invent or paraphrase; copy the exact lines that would be perceived.
 - Event lines may include tags of the form "Actor@location: ...". Prefer selecting lines where the location matches the NPC's current room.
 - Consider location, proximity, and what could be seen or heard (e.g., speech may carry to nearby rooms; be conservative).
-- If nothing is perceived, return an empty array []` ,
-        UserPrompt:   sb.String(),
-        MaxTokens:    150,
+- If nothing is perceived, return {"events": []}`,
+        UserPrompt:      sb.String(),
+        MaxTokens:       2000,
+        Model:           "gpt-5-mini",
+        ReasoningEffort: "minimal",
+        SchemaName:      "perceived_events",
+        Schema:          schema,
     }
 
     ctx = llm.WithOperationType(ctx, "npc.perceive")
-    content, err := llmService.CompleteJSON(ctx, req)
+    content, err := llmService.CompleteJSONSchema(ctx, req)
     if err != nil {
         return []string{}, err
     }
 
-    // Robust parsing: handle direct arrays, object-wrapped arrays, and empty content
-    var arr []string
-    if strings.TrimSpace(content) == "" {
-        arr = []string{}
-    } else if jerr := json.Unmarshal([]byte(content), &arr); jerr != nil {
-        // Try common object-wrapped formats
-        var obj map[string]interface{}
-        if oerr := json.Unmarshal([]byte(content), &obj); oerr == nil {
-            for _, key := range []string{"perceived", "events", "lines", "results", "items"} {
-                if v, ok := obj[key]; ok {
-                    if a, ok := v.([]interface{}); ok {
-                        tmp := make([]string, 0, len(a))
-                        for _, it := range a {
-                            if s, ok := it.(string); ok && strings.TrimSpace(s) != "" {
-                                tmp = append(tmp, strings.TrimSpace(s))
-                            }
-                        }
-                        arr = tmp
-                        break
-                    }
-                }
-            }
-            // If LLM returned an error object, treat as empty selection
-            if len(arr) == 0 {
-                if _, hasErr := obj["error"]; hasErr {
-                    arr = []string{}
-                }
-            }
-        }
-        // If still not parsed, fall back to empty set (do not hard fail; deterministic additions later apply)
-        if arr == nil {
-            arr = []string{}
-        }
+    if debug {
+        log.Printf("[DEBUG] NPC %s perception raw response: %q", npcID, content)
     }
+
+    // Parse JSON object response (JSON schema guarantees proper format)
+    var response struct {
+        Events []string `json:"events"`
+    }
+    if strings.TrimSpace(content) == "" {
+        response.Events = []string{}
+    } else if jerr := json.Unmarshal([]byte(content), &response); jerr != nil {
+        // JSON schema should prevent malformed responses, but handle gracefully
+        return []string{}, fmt.Errorf("failed to parse perception response: %w", jerr)
+    }
+    
+    arr := response.Events
     // Ensure we only return exact matches from input (defensive)
     allowed := make(map[string]struct{}, len(worldEventLines))
     for _, l := range worldEventLines {
