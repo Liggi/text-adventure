@@ -141,7 +141,7 @@ func (d *Director) InterpretIntent(ctx context.Context, userInput string, world 
 	req := llm.JSONCompletionRequest{
 		SystemPrompt: buildDirectorPrompt(toolDescriptions, world, gameHistory, actionLabel, actingNPCID),
 		UserPrompt:   fmt.Sprintf("%s: %s", actionLabel, userInput),
-		MaxTokens:    400,
+		MaxTokens:    2000,
 	}
 
     content, err := d.llmService.CompleteJSON(ctx, req)
@@ -338,17 +338,35 @@ func (d *Director) summarizeTurnEvents(ctx context.Context, userInput, npcID str
         fmt.Fprintf(sb, "WORLD HINT: %s\n", worldDeltaHint)
     }
 
-    req := llm.JSONCompletionRequest{
-        SystemPrompt: `You summarize the outcome of a single game turn.
-Return a JSON array of short, human-readable lines describing what actually happened this turn.
-Use present tense. Do not invent events. It's OK if some lines describe attempts that didn't change state (like examining).` ,
-        UserPrompt:   sb.String(),
-        MaxTokens:    120,
+    schema := map[string]interface{}{
+        "type": "object",
+        "properties": map[string]interface{}{
+            "events": map[string]interface{}{
+                "type": "array",
+                "items": map[string]interface{}{
+                    "type": "string",
+                },
+                "description": "Array of short, human-readable lines describing what actually happened this turn",
+            },
+        },
+        "required": []string{"events"},
+        "additionalProperties": false,
     }
 
-    // Tag this as an event summarization op
+    req := llm.JSONSchemaCompletionRequest{
+        SystemPrompt:    `You summarize the outcome of a single game turn.
+Output the events as an array of short, human-readable lines describing what actually happened this turn.
+Use present tense. Do not invent events. It's OK if some lines describe attempts that didn't change state (like examining).`,
+        UserPrompt:      sb.String(),
+        MaxTokens:       4000,
+        Model:           "gpt-5-mini",
+        ReasoningEffort: "minimal",
+        SchemaName:      "event_summary",
+        Schema:          schema,
+    }
+
     ctx = llm.WithOperationType(ctx, "events.summarize")
-    content, err := d.llmService.CompleteJSON(ctx, req)
+    content, err := d.llmService.CompleteJSONSchema(ctx, req)
     if err != nil {
         if d.debugLogger != nil {
             d.debugLogger.Errorf("event summarization failed: %v", err)
@@ -383,31 +401,16 @@ Use present tense. Do not invent events. It's OK if some lines describe attempts
         d.debugLogger.Printf("[DEBUG] events.summarize raw: %s", raw)
     }
 
+    var response struct {
+        Events []string `json:"events"`
+    }
     var arr []string
-    if jerr := json.Unmarshal([]byte(content), &arr); jerr != nil {
-        // Try common object-wrapped formats
-        var obj map[string]interface{}
-        if oerr := json.Unmarshal([]byte(content), &obj); oerr == nil {
-            for _, key := range []string{"events", "lines", "results", "items"} {
-                if v, ok := obj[key]; ok {
-                    if a, ok := v.([]interface{}); ok {
-                        tmp := make([]string, 0, len(a))
-                        for _, it := range a {
-                            if s, ok := it.(string); ok && strings.TrimSpace(s) != "" {
-                                tmp = append(tmp, strings.TrimSpace(s))
-                            }
-                        }
-                        arr = tmp
-                        break
-                    }
-                }
-            }
+    if jerr := json.Unmarshal([]byte(content), &response); jerr != nil {
+        if d.debugLogger != nil {
+            d.debugLogger.Errorf("event summarization JSON parse failed: %v", jerr)
         }
-        if len(arr) == 0 {
-            if d.debugLogger != nil {
-                d.debugLogger.Errorf("event summarization JSON parse failed: %v", jerr)
-            }
-        }
+    } else {
+        arr = response.Events
     }
     // If still empty, fallback conservatively (request succeeded but format unexpected)
     if len(arr) == 0 {
