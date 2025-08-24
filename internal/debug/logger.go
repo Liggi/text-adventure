@@ -6,7 +6,7 @@ import (
 )
 
 type Logger struct {
-	enabled bool
+    enabled bool
 }
 
 func NewLogger(enabled bool) *Logger {
@@ -25,11 +25,27 @@ func NewLogger(enabled bool) *Logger {
 }
 
 func (d *Logger) Printf(format string, args ...interface{}) {
-	log.Printf(format, args...)
+    log.Printf(format, args...)
 }
 
 func (d *Logger) Println(args ...interface{}) {
-	log.Println(args...)
+    log.Println(args...)
+}
+
+// Errorf logs a formatted error message with an [ERROR] prefix for visibility.
+func (d *Logger) Errorf(format string, args ...interface{}) {
+    log.Printf("[ERROR] "+format, args...)
+}
+
+// Errorln logs an error line with an [ERROR] prefix for visibility.
+func (d *Logger) Errorln(args ...interface{}) {
+    // Prepend [ERROR] to the first arg for consistency
+    if len(args) > 0 {
+        args[0] = "[ERROR] " + args[0].(string)
+    } else {
+        args = append(args, "[ERROR]")
+    }
+    log.Println(args...)
 }
 
 func (d *Logger) IsEnabled() bool {

@@ -160,7 +160,19 @@ func GenerateNPCTurn(ctx context.Context, llmService *llm.Service, npcID string,
         pctx, pspan := tracer.Start(ctx, "perception.llm")
         perceivedLines, perr := perception.GeneratePerceivedEventsForNPC(pctx, llmService, npcID, world, worldEventLines)
         if perr != nil && debug {
-            log.Printf("Perception error for %s: %v", npcID, perr)
+            log.Printf("[ERROR] Perception error for %s: %v", npcID, perr)
+        }
+        if debug {
+            if len(worldEventLines) == 0 {
+                log.Printf("[DEBUG] NPC %s event input: (none)", npcID)
+            } else {
+                log.Printf("[DEBUG] NPC %s event input (%d): %v", npcID, len(worldEventLines), worldEventLines)
+            }
+            if len(perceivedLines) == 0 {
+                log.Printf("[DEBUG] NPC %s perceived: (none)", npcID)
+            } else {
+                log.Printf("[DEBUG] NPC %s perceived (%d): %v", npcID, len(perceivedLines), perceivedLines)
+            }
         }
         pspan.SetAttributes(
             attribute.String("npc.id", npcID),
@@ -186,7 +198,7 @@ Be concrete and neutral. No invention beyond those details.`,
             if serr == nil {
                 situation = strings.TrimSpace(out)
             } else if debug {
-                log.Printf("Situation summary failed for %s: %v", npcID, serr)
+                log.Printf("[ERROR] Situation summary failed for %s: %v", npcID, serr)
             }
             sspan.End()
         }
@@ -199,7 +211,7 @@ Be concrete and neutral. No invention beyond those details.`,
         action, err := GenerateNPCAction(ctx, llmService, npcID, thoughts, world, perceivedLines, debug)
         if err != nil {
             if debug {
-                log.Printf("Error generating action for %s: %v", npcID, err)
+                log.Printf("[ERROR] Error generating action for %s: %v", npcID, err)
             }
             action = ""
         }

@@ -258,22 +258,29 @@ func (m *Model) extractAndAccumulateFacts(narrationText string) {
     extractedFacts, err := facts.ExtractLocationFacts(ctx, m.llmService, narrationText, m.world.Location, currentLocation.Facts)
     if err != nil {
         if m.loggers.Debug.IsEnabled() {
-            m.loggers.Debug.Printf("Fact extraction failed: %v", err)
+            m.loggers.Debug.Errorf("Fact extraction failed: %v", err)
+            m.messages = append(m.messages, "\033[31m[ERROR] Fact extraction failed\033[0m")
         }
         return
     }
     
     if len(extractedFacts) > 0 {
         if m.loggers.Debug.IsEnabled() {
-            debugMsg := fmt.Sprintf("[DEBUG] Facts extracted: %v", extractedFacts)
-            m.loggers.Debug.Printf(debugMsg)
-            m.messages = append(m.messages, debugMsg)
+            header := "[DEBUG] Facts extracted:"
+            m.loggers.Debug.Printf(header)
+            m.messages = append(m.messages, header)
+            for _, f := range extractedFacts {
+                line := "  - " + strings.TrimSpace(f)
+                m.loggers.Debug.Printf(line)
+                m.messages = append(m.messages, line)
+            }
         }
         
         attribution, err := facts.AttributeFacts(ctx, m.llmService, extractedFacts, &m.world)
         if err != nil {
             if m.loggers.Debug.IsEnabled() {
-                m.loggers.Debug.Printf("Fact attribution failed: %v", err)
+                m.loggers.Debug.Errorf("Fact attribution failed: %v", err)
+                m.messages = append(m.messages, "\033[31m[ERROR] Fact attribution failed\033[0m")
             }
             m.world.AccumulateLocationFacts(m.world.Location, extractedFacts)
             return
@@ -311,7 +318,85 @@ func (m *Model) extractAndAccumulateFacts(narrationText string) {
     }
 }
 
+// extractAndAccumulateFactsForLocation runs fact extraction/attribution for a specific location
+// (used to attribute NPC-perspective narration to the NPC's current room).
+func (m *Model) extractAndAccumulateFactsForLocation(locationID string, narrationText string) {
+    if strings.TrimSpace(narrationText) == "" {
+        return
+    }
+    loc, exists := m.world.Locations[locationID]
+    if !exists {
+        return
+    }
+    ctx := m.createGameContext(m.sessionContext, "facts.extract")
+    extractedFacts, err := facts.ExtractLocationFacts(ctx, m.llmService, narrationText, locationID, loc.Facts)
+    if err != nil {
+        if m.loggers.Debug.IsEnabled() {
+            m.loggers.Debug.Errorf("Fact extraction failed (%s): %v", locationID, err)
+            m.messages = append(m.messages, fmt.Sprintf("\033[31m[ERROR] Fact extraction failed for %s\033[0m", locationID))
+        }
+        return
+    }
+    if len(extractedFacts) == 0 {
+        if m.loggers.Debug.IsEnabled() {
+            header := fmt.Sprintf("[DEBUG] Facts extracted for %s:", locationID)
+            m.loggers.Debug.Printf(header)
+            m.messages = append(m.messages, header)
+            m.loggers.Debug.Printf("  - (none)")
+            m.messages = append(m.messages, "  - (none)")
+        }
+        return
+    }
+    if m.loggers.Debug.IsEnabled() {
+        header := fmt.Sprintf("[DEBUG] Facts extracted for %s:", locationID)
+        m.loggers.Debug.Printf(header)
+        m.messages = append(m.messages, header)
+        for _, f := range extractedFacts {
+            line := "  - " + strings.TrimSpace(f)
+            m.loggers.Debug.Printf(line)
+            m.messages = append(m.messages, line)
+        }
+    }
+    attribution, err := facts.AttributeFacts(ctx, m.llmService, extractedFacts, &m.world)
+    if err != nil {
+        if m.loggers.Debug.IsEnabled() {
+            m.loggers.Debug.Errorf("Fact attribution failed (%s): %v", locationID, err)
+            m.messages = append(m.messages, fmt.Sprintf("\033[31m[ERROR] Fact attribution failed for %s\033[0m", locationID))
+        }
+        m.world.AccumulateLocationFacts(locationID, extractedFacts)
+        return
+    }
+    m.persistAttributedFactsForLocation(attribution, locationID)
+    if m.loggers.Debug.IsEnabled() {
+        for lID, f := range attribution.LocationFacts {
+            debugMsg := fmt.Sprintf("[DEBUG] Location %s: %v", lID, f)
+            m.loggers.Debug.Printf(debugMsg)
+            m.messages = append(m.messages, debugMsg)
+        }
+        for itemID, f := range attribution.ItemFacts {
+            debugMsg := fmt.Sprintf("[DEBUG] Item %s: %v", itemID, f)
+            m.loggers.Debug.Printf(debugMsg)
+            m.messages = append(m.messages, debugMsg)
+        }
+        for npcID, f := range attribution.NPCFacts {
+            debugMsg := fmt.Sprintf("[DEBUG] NPC %s: %v", npcID, f)
+            m.loggers.Debug.Printf(debugMsg)
+            m.messages = append(m.messages, debugMsg)
+        }
+        if len(attribution.Skipped) > 0 {
+            debugMsg := fmt.Sprintf("[DEBUG] Skipped: %v", attribution.Skipped)
+            m.loggers.Debug.Printf(debugMsg)
+            m.messages = append(m.messages, debugMsg)
+        }
+    }
+}
+
 func (m *Model) persistAttributedFacts(attribution *facts.FactAttribution) {
+    m.persistAttributedFactsForLocation(attribution, m.world.Location)
+}
+
+// persistAttributedFactsForLocation persists attributed facts, scoping item creation to the observer's location.
+func (m *Model) persistAttributedFactsForLocation(attribution *facts.FactAttribution, observerLocationID string) {
     ctx := m.createGameContext(m.sessionContext, "facts.persist")
     
     // Persist location facts
@@ -322,7 +407,8 @@ func (m *Model) persistAttributedFacts(attribution *facts.FactAttribution) {
                 "new_facts":   locationFacts,
             })
             if err != nil && m.loggers.Debug.IsEnabled() {
-                m.loggers.Debug.Printf("Failed to persist location facts for %s: %v", locationID, err)
+                m.loggers.Debug.Errorf("Failed to persist location facts for %s: %v", locationID, err)
+                m.messages = append(m.messages, fmt.Sprintf("\033[31m[ERROR] Persist location facts failed for %s\033[0m", locationID))
             } else if m.loggers.Debug.IsEnabled() {
                 m.loggers.Debug.Printf("Persisted location facts for %s: %s", locationID, result)
             }
@@ -338,13 +424,13 @@ func (m *Model) persistAttributedFacts(attribution *facts.FactAttribution) {
         }
     }
     
-    // Create items and persist item facts
+    // Create items and persist item facts (assigning to observer's current location)
     for itemID, itemFacts := range attribution.ItemFacts {
         if len(itemFacts) > 0 {
             result, err := m.mcpClient.CallTool(ctx, "create_item", map[string]interface{}{
                 "item_id":       itemID,
                 "name":          itemID, // Use item_id as name for now
-                "location":      m.world.Location,
+                "location":      observerLocationID,
                 "initial_facts": itemFacts,
             })
             if err != nil && m.loggers.Debug.IsEnabled() {
@@ -354,7 +440,8 @@ func (m *Model) persistAttributedFacts(attribution *facts.FactAttribution) {
                     "new_facts": itemFacts,
                 })
                 if err != nil && m.loggers.Debug.IsEnabled() {
-                    m.loggers.Debug.Printf("Failed to persist item facts for %s: %v", itemID, err)
+                    m.loggers.Debug.Errorf("Failed to persist item facts for %s: %v", itemID, err)
+                    m.messages = append(m.messages, fmt.Sprintf("\033[31m[ERROR] Persist item facts failed for %s\033[0m", itemID))
                 } else if m.loggers.Debug.IsEnabled() {
                     m.loggers.Debug.Printf("Added facts to existing item %s: %s", itemID, result)
                 }
@@ -372,7 +459,8 @@ func (m *Model) persistAttributedFacts(attribution *facts.FactAttribution) {
                 "new_facts": npcFacts,
             })
             if err != nil && m.loggers.Debug.IsEnabled() {
-                m.loggers.Debug.Printf("Failed to persist NPC facts for %s: %v", npcID, err)
+                m.loggers.Debug.Errorf("Failed to persist NPC facts for %s: %v", npcID, err)
+                m.messages = append(m.messages, fmt.Sprintf("\033[31m[ERROR] Persist NPC facts failed for %s\033[0m", npcID))
             } else if m.loggers.Debug.IsEnabled() {
                 m.loggers.Debug.Printf("Persisted NPC facts for %s: %s", npcID, result)
             }

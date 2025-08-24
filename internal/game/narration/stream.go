@@ -5,6 +5,7 @@ import (
     "errors"
     "io"
     "log"
+    "strings"
     "time"
 
     tea "github.com/charmbracelet/bubbletea"
@@ -166,6 +167,37 @@ func ReadNextChunk(stream *openai.ChatCompletionStream, debug bool, completionCt
 
 // StreamErrorMsg represents a streaming error
 type StreamErrorMsg struct {
-	Response string
-	Err      error
+    Response string
+    Err      error
+}
+
+// filterEventsForPlayerPerspective filters omniscient turn event lines to what the player could plausibly perceive.
+// For now, keep a conservative pass-through to avoid hiding potentially important context.
+// Future enhancement: drop lines clearly marked as other-actor internal states or non-observable events.
+func filterEventsForPlayerPerspective(world game.WorldState, worldEventLines []string, actingNPCID ...string) []string {
+    playerLoc := world.Location
+    filtered := make([]string, 0, len(worldEventLines))
+    for _, line := range worldEventLines {
+        s := strings.TrimSpace(line)
+        if s == "" {
+            continue
+        }
+        // Expect optional tag form: Actor@location: rest
+        // If a tag exists and location matches player's location, include.
+        // If no tag, include conservatively (mutation summaries etc.).
+        atIdx := strings.Index(s, "@")
+        colonIdx := strings.Index(s, ":")
+        if atIdx > 0 && colonIdx > atIdx {
+            loc := strings.TrimSpace(s[atIdx+1 : colonIdx])
+            if loc == playerLoc {
+                filtered = append(filtered, s)
+                continue
+            }
+            // Non-matching tagged line: skip for player view
+            continue
+        }
+        // No tag: include as-is
+        filtered = append(filtered, s)
+    }
+    return filtered
 }

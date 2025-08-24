@@ -20,9 +20,9 @@ func ExtractLocationFacts(ctx context.Context, llmService *llm.Service, narratio
 	ctx, span := tracer.Start(ctx, "facts.extract")
 	defer span.End()
 
-	systemPrompt := `Extract permanent, canonical facts about the location from this player-experienced narration.
+	systemPrompt := `Extract permanent, canonical facts about the location from this narration as directly experienced by the observer.
 
-IMPORTANT: Only extract facts that represent what the player directly observed or experienced. This narration describes things from the player's perspective - the facts you extract become the player's established knowledge about this space.
+IMPORTANT: Only extract facts that represent what the observer directly observed or experienced. This narration describes things from a first-person present perspective - the facts you extract become the observer's established knowledge about this space.
 
 Write facts as short, precise descriptions WITHOUT repeating the location name:
 - GOOD: "has slanted light", "smells of old paper", "doormat is scuffed"
@@ -46,7 +46,7 @@ AVOID semantic duplicates of existing facts:
 - Look for semantic similarity, not just exact text matches
 
 Return a JSON array of strings. Each fact should be maximally granular and concise.
-Extract each detail as a separate fact. Only extract what the player has genuinely observed.`
+Extract each detail as a separate fact. Only extract what the observer has genuinely perceived.`
 
 	existingFactsSection := ""
 	if len(existingFacts) > 0 {

@@ -351,15 +351,19 @@ Use present tense. Do not invent events. It's OK if some lines describe attempts
     content, err := d.llmService.CompleteJSON(ctx, req)
     if err != nil {
         if d.debugLogger != nil {
-            d.debugLogger.Printf("event summarization failed: %v", err)
+            d.debugLogger.Errorf("event summarization failed: %v", err)
         }
         // Fallback: derive lines from successes/failures/user input conservatively
         lines := []string{}
         if userInput != "" {
             if npcID != "" {
-                lines = append(lines, fmt.Sprintf("%s: %s", actor, userInput))
+                npcLoc := newWorld.Location
+                if n, ok := newWorld.NPCs[npcID]; ok && n.Location != "" {
+                    npcLoc = n.Location
+                }
+                lines = append(lines, fmt.Sprintf("%s@%s: %s", actor, npcLoc, userInput))
             } else {
-                lines = append(lines, fmt.Sprintf("Player: %s", userInput))
+                lines = append(lines, fmt.Sprintf("Player@%s: %s", newWorld.Location, userInput))
             }
         }
         for _, s := range successes {
@@ -370,12 +374,73 @@ Use present tense. Do not invent events. It's OK if some lines describe attempts
         }
         return lines
     }
+    if d.debugLogger != nil && d.debugLogger.IsEnabled() {
+        // Log raw content for debugging (truncate to avoid huge logs)
+        raw := content
+        if len(raw) > 800 {
+            raw = raw[:800] + "..."
+        }
+        d.debugLogger.Printf("[DEBUG] events.summarize raw: %s", raw)
+    }
+
     var arr []string
     if jerr := json.Unmarshal([]byte(content), &arr); jerr != nil {
-        if d.debugLogger != nil {
-            d.debugLogger.Printf("event summarization JSON parse failed: %v", jerr)
+        // Try common object-wrapped formats
+        var obj map[string]interface{}
+        if oerr := json.Unmarshal([]byte(content), &obj); oerr == nil {
+            for _, key := range []string{"events", "lines", "results", "items"} {
+                if v, ok := obj[key]; ok {
+                    if a, ok := v.([]interface{}); ok {
+                        tmp := make([]string, 0, len(a))
+                        for _, it := range a {
+                            if s, ok := it.(string); ok && strings.TrimSpace(s) != "" {
+                                tmp = append(tmp, strings.TrimSpace(s))
+                            }
+                        }
+                        arr = tmp
+                        break
+                    }
+                }
+            }
         }
-        return []string{}
+        if len(arr) == 0 {
+            if d.debugLogger != nil {
+                d.debugLogger.Errorf("event summarization JSON parse failed: %v", jerr)
+            }
+        }
+    }
+    // If still empty, fallback conservatively (request succeeded but format unexpected)
+    if len(arr) == 0 {
+        lines := []string{}
+        // attempt line with tags added below after we compute it
+        for _, s := range successes { lines = append(lines, s) }
+        for _, f := range failures { lines = append(lines, f) }
+        arr = lines
+    }
+    // Always include a canonical attempt line with location tag for perception routing
+    attempt := ""
+    if npcID != "" {
+        npcLoc := newWorld.Location
+        if n, ok := newWorld.NPCs[npcID]; ok && n.Location != "" {
+            npcLoc = n.Location
+        }
+        attempt = fmt.Sprintf("%s@%s: %s", actor, npcLoc, userInput)
+    } else {
+        attempt = fmt.Sprintf("Player@%s: %s", newWorld.Location, userInput)
+    }
+    // Prepend attempt if not already present
+    hasAttempt := false
+    for _, line := range arr {
+        if strings.TrimSpace(strings.ToLower(line)) == strings.TrimSpace(strings.ToLower(attempt)) {
+            hasAttempt = true
+            break
+        }
+    }
+    if !hasAttempt {
+        arr = append([]string{attempt}, arr...)
+    }
+    if d.debugLogger != nil && d.debugLogger.IsEnabled() {
+        d.debugLogger.Printf("[DEBUG] events.final_lines (%d): %v", len(arr), arr)
     }
     return arr
 }
