@@ -38,7 +38,8 @@ func buildDirectorPrompt(toolDescriptions string, world game.WorldState, gameHis
 %s
 %s
 - Drop item: remove_from_inventory, then transfer_item to current location.
-- Examine/look: usually no mutations needed.
+- Examine/look at environment: usually no mutations needed.
+- Examine/look at NPCs or specific items: may need mutations to trigger detailed descriptions or NPC reactions.
 - NPCs may only affect items at their location or move themselves.
 </guidelines>
 

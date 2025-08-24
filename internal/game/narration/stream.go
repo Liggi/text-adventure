@@ -2,14 +2,13 @@ package narration
 
 import (
     "context"
-    "errors"
-    "io"
     "log"
     "strings"
     "time"
 
     tea "github.com/charmbracelet/bubbletea"
-    "github.com/sashabaranov/go-openai"
+    "github.com/openai/openai-go"
+    "github.com/openai/openai-go/packages/ssestream"
 
     "textadventure/internal/game"
     "textadventure/internal/llm"
@@ -21,7 +20,7 @@ import (
 
 // StreamStartedMsg represents a started narration stream
 type StreamStartedMsg struct {
-    Stream        *openai.ChatCompletionStream
+    Stream        *ssestream.Stream[openai.ChatCompletionChunk]
     Debug         bool
     World         game.WorldState
     UserInput     string
@@ -35,7 +34,7 @@ type StreamStartedMsg struct {
 // StreamChunkMsg represents a chunk from the narration stream
 type StreamChunkMsg struct {
     Chunk         string
-    Stream        *openai.ChatCompletionStream
+    Stream        *ssestream.Stream[openai.ChatCompletionChunk]
     Debug         bool
     CompletionCtx *StreamStartedMsg
 }
@@ -69,7 +68,7 @@ func StartLLMStream(ctx context.Context, llmService *llm.Service, userInput stri
         req := llm.StreamCompletionRequest{
             SystemPrompt: systemPrompt,
             UserPrompt:   worldContext + "PLAYER ACTION: " + userInput,
-            MaxTokens:    200,
+            MaxTokens:    4000,
         }
         // Create narration span as a generation observation
         tracer := otel.Tracer("narration")
@@ -110,59 +109,60 @@ func StartLLMStream(ctx context.Context, llmService *llm.Service, userInput stri
 }
 
 // ReadNextChunk reads the next chunk from the narration stream
-func ReadNextChunk(stream *openai.ChatCompletionStream, debug bool, completionCtx *StreamStartedMsg, fullResponse string) tea.Cmd {
-	return func() tea.Msg {
-		response, err := stream.Recv()
-		
-		if errors.Is(err, io.EOF) {
-			if debug {
-				log.Println("Stream finished")
-			}
-			stream.Close()
-			
-			responseTime := time.Since(completionCtx.StartTime)
-			metadata := logging.CompletionMetadata{
-				Model:         "gpt-5-2025-08-07",
-				MaxTokens:     200,
-				ResponseTime:  responseTime,
-				StreamingUsed: true,
-			}
-			
-			if logErr := completionCtx.Logger.LogCompletion(completionCtx.World, completionCtx.UserInput, completionCtx.SystemPrompt, fullResponse, metadata); logErr != nil && debug {
-				log.Printf("Failed to log completion: %v", logErr)
-			}
-			
-            return StreamCompleteMsg{
-                World:         completionCtx.World,
-                UserInput:     completionCtx.UserInput,
-                SystemPrompt:  completionCtx.SystemPrompt,
-                Response:      fullResponse,
-                StartTime:     completionCtx.StartTime,
-                Logger:        completionCtx.Logger,
-                Debug:         debug,
-                WorldEventLines:   completionCtx.WorldEventLines,
-                Span:          completionCtx.Span,
+func ReadNextChunk(stream *ssestream.Stream[openai.ChatCompletionChunk], debug bool, completionCtx *StreamStartedMsg, fullResponse string) tea.Cmd {
+    return func() tea.Msg {
+        if stream.Next() {
+            chunk := stream.Current()
+            if len(chunk.Choices) > 0 {
+                delta := chunk.Choices[0].Delta.Content
+                if delta != "" {
+                    if debug {
+                        log.Printf("Stream chunk: %q", delta)
+                    }
+                    return StreamChunkMsg{Chunk: delta, Stream: stream, Debug: debug, CompletionCtx: completionCtx}
+                }
             }
+            // No textual delta; keep reading
+            return ReadNextChunk(stream, debug, completionCtx, fullResponse)()
         }
-		
-		if err != nil {
-			if debug {
-				log.Printf("Stream error: %v", err)
-			}
-			stream.Close()
-			return StreamErrorMsg{Response: "", Err: err}
-		}
-		
-		if len(response.Choices) > 0 && response.Choices[0].Delta.Content != "" {
-			chunk := response.Choices[0].Delta.Content
-			if debug {
-				log.Printf("Stream chunk: %q", chunk)
-			}
-			return StreamChunkMsg{Chunk: chunk, Stream: stream, Debug: debug, CompletionCtx: completionCtx}
-		}
-		
-		return ReadNextChunk(stream, debug, completionCtx, fullResponse)()
-	}
+
+        if err := stream.Err(); err != nil {
+            if debug {
+                log.Printf("Stream error: %v", err)
+            }
+            stream.Close()
+            return StreamErrorMsg{Response: "", Err: err}
+        }
+
+        if debug {
+            log.Println("Stream finished")
+        }
+        stream.Close()
+
+        responseTime := time.Since(completionCtx.StartTime)
+        metadata := logging.CompletionMetadata{
+            Model:         "gpt-5-2025-08-07",
+            MaxTokens:     4000,
+            ResponseTime:  responseTime,
+            StreamingUsed: true,
+        }
+
+        if logErr := completionCtx.Logger.LogCompletion(completionCtx.World, completionCtx.UserInput, completionCtx.SystemPrompt, fullResponse, metadata); logErr != nil && debug {
+            log.Printf("Failed to log completion: %v", logErr)
+        }
+
+        return StreamCompleteMsg{
+            World:         completionCtx.World,
+            UserInput:     completionCtx.UserInput,
+            SystemPrompt:  completionCtx.SystemPrompt,
+            Response:      fullResponse,
+            StartTime:     completionCtx.StartTime,
+            Logger:        completionCtx.Logger,
+            Debug:         debug,
+            WorldEventLines:   completionCtx.WorldEventLines,
+            Span:          completionCtx.Span,
+        }
+    }
 }
 
 // StreamErrorMsg represents a streaming error

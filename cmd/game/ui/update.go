@@ -3,6 +3,7 @@ package ui
 import (
     "context"
     "fmt"
+    "log"
     "strings"
     "time"
 
@@ -72,9 +73,8 @@ func (m Model) handleInitialLook(msg initialLookAroundMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m Model) handleNPCTurn(msg npcTurnMsg) (tea.Model, tea.Cmd) {
-    if !m.loading && m.turnPhase == NPCTurns && !m.npcTurnComplete {
+    if m.turnPhase == NPCTurns && !m.npcTurnComplete {
         m.npcTurnComplete = true
-        // Enrich turn context with game/session info for NPC flows
         npcCtx := m.createGameContext(m.turnContext, "npc.turn")
         return m, actors.GenerateNPCTurn(npcCtx, m.llmService, "elena", m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled(), msg.worldEventLines)
     }
@@ -82,15 +82,14 @@ func (m Model) handleNPCTurn(msg npcTurnMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleNarrationTurn(msg narrationTurnMsg) (tea.Model, tea.Cmd) {
-	if !m.loading && m.turnPhase == Narration {
-		m.loading = true
-		m.animationFrame = 0
-		m.messages = append(m.messages, "LOADING_ANIMATION")
-		
-        userInput := "narrate recent events"
-        // Continue current turn context
-        ctx := m.createGameContext(m.turnContext, "director.narration")
-        return m, tea.Batch(m.director.ProcessPlayerActionWithContext(ctx, userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
+	if !m.loading {
+        m.turnPhase = Narration
+        m.loading = true
+        m.animationFrame = 0
+        m.messages = append(m.messages, "LOADING_ANIMATION")
+        
+        ctx := m.createGameContext(m.turnContext, "narration.generate")
+        return m, narration.StartLLMStream(ctx, m.llmService, msg.userInput, msg.world, msg.gameHistory, m.loggers.Completion, msg.debug, msg.actionContext, msg.mutationResults, msg.worldEventLines)
     }
     return m, nil
 }
@@ -196,6 +195,9 @@ func (m Model) handleStreamStarted(msg narration.StreamStartedMsg) (tea.Model, t
 
 func (m Model) handleStreamChunk(msg narration.StreamChunkMsg) (tea.Model, tea.Cmd) {
 	if m.streaming {
+		if msg.Debug {
+			log.Printf("DEBUG: Received chunk: %q", msg.Chunk)
+		}
 		m.currentResponse += msg.Chunk
 		if len(m.messages) > 0 {
 			m.messages[len(m.messages)-1] = m.currentResponse
@@ -206,6 +208,9 @@ func (m Model) handleStreamChunk(msg narration.StreamChunkMsg) (tea.Model, tea.C
 
 func (m Model) handleStreamComplete(msg narration.StreamCompleteMsg) (tea.Model, tea.Cmd) {
     if m.streaming {
+        if msg.Debug {
+            log.Printf("DEBUG: Stream complete - currentResponse: %q", m.currentResponse)
+        }
         m.streaming = false
         m.loading = false
         
@@ -309,7 +314,9 @@ func (m Model) handleMutationsGenerated(msg director.MutationsGeneratedMsg) (tea
             m.messages = append(m.messages, "")
         }
         
-        // no accumulation needed for event lines
+        m.accumulatedWorldEvents = append(m.accumulatedWorldEvents, msg.WorldEventLines...)
+        m.currentMutationResults = append(m.currentMutationResults, msg.Successes...)
+        m.currentActionContext = msg.ActionContext
 		
 		if m.turnPhase == Narration {
 			m.messages = append(m.messages, "LOADING_ANIMATION")
@@ -327,13 +334,21 @@ func (m Model) handleMutationsGenerated(msg director.MutationsGeneratedMsg) (tea
                 // Compute perceptions for NPC in next step
                 return m, npcTurnCmd(msg.WorldEventLines)
             case NPCTurns:
-                m.turnPhase = Narration
-                m.npcTurnComplete = false
-                cmds := []tea.Cmd{startNarrationCmd(m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled())}
-                if msg.ActingNPCID != "" {
-                    cmds = append(cmds, m.generateNPCNarration(msg.ActingNPCID, msg.WorldEventLines, msg.ActionContext, msg.Successes))
-                }
-                return m, tea.Batch(cmds...)
+                m.loading = false
+                
+                return m, func() tea.Cmd {
+                    return func() tea.Msg {
+                        return narrationTurnMsg{
+                            world:            m.world,
+                            gameHistory:      m.gameHistory.GetEntries(),
+                            debug:            m.loggers.Debug.IsEnabled(),
+                            userInput:        m.currentUserInput,
+                            actionContext:    m.currentActionContext,
+                            mutationResults:  m.currentMutationResults,
+                            worldEventLines:  m.accumulatedWorldEvents,
+                        }
+                    }
+                }()
             default:
 				return m, nil
 			}
@@ -377,9 +392,13 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			
+			m.messages = append(m.messages, "")
 			m.messages = append(m.messages, "> "+userInput)
 			m.messages = append(m.messages, "")
 			m.gameHistory.AddPlayerAction(userInput)
+			m.currentUserInput = userInput
+			m.accumulatedWorldEvents = []string{}
+			m.currentMutationResults = []string{}
 			m.loading = true
 			m.animationFrame = 0
 			m.messages = append(m.messages, "LOADING_ANIMATION")
@@ -437,7 +456,7 @@ func (m Model) generateNPCNarration(npcID string, worldEventLines []string, acti
         req := llm.TextCompletionRequest{
             SystemPrompt: systemPrompt,
             UserPrompt:   worldCtx + "NPC ACTION: " + strings.ToUpper(npcID),
-            MaxTokens:    180,
+            MaxTokens:    2000,
         }
         ctx := m.createGameContext(m.sessionContext, "npc.narration")
         text, err := m.llmService.CompleteText(ctx, req)

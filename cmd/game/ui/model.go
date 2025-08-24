@@ -67,6 +67,9 @@ type Model struct {
 	turnPhase               TurnPhase
 	npcTurnComplete         bool
     accumulatedWorldEvents  []string
+    currentUserInput        string
+    currentActionContext    string
+    currentMutationResults  []string
     sessionID               string
     sessionStartTime        time.Time
     sessionContext          context.Context
@@ -121,6 +124,9 @@ func NewModel(
 		turnPhase:               PlayerTurn,
 		npcTurnComplete:         false,
         accumulatedWorldEvents:  []string{},
+        currentUserInput:        "",
+        currentActionContext:    "",
+        currentMutationResults:  []string{},
 		sessionID:               sessionID,
         sessionStartTime:        sessionStartTime,
         sessionContext:          sessionCtx,
@@ -146,9 +152,13 @@ type npcTurnMsg struct{
 }
 
 type narrationTurnMsg struct {
-	world       game.WorldState
-	gameHistory []string
-	debug       bool
+	world            game.WorldState
+	gameHistory      []string
+	debug            bool
+	userInput        string
+	actionContext    string
+	mutationResults  []string
+	worldEventLines  []string
 }
 
 
