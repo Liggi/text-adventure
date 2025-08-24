@@ -52,7 +52,7 @@ func GenerateSensoryEvents(ctx context.Context, llmService *llm.Service, userInp
 	req := llm.JSONCompletionRequest{
 		SystemPrompt: buildSensoryEventPrompt(),
 		UserPrompt:   contextMsg,
-		MaxTokens:    400,
+		MaxTokens:    2000,
 	}
 
     ctx = llm.WithOperationType(ctx, "sensory.generate")
