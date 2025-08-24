@@ -72,7 +72,7 @@ func GenerateNPCThoughts(ctx context.Context, llmService *llm.Service, npcID str
 			recentActions = npc.RecentActions
 			personality = npc.Personality
 			backstory = npc.Backstory
-			coreMemories = npc.CoreMemories
+			coreMemories = npc.Memories
 		}
 		
         req := llm.TextCompletionRequest{

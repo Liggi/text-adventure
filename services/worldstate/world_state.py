@@ -39,185 +39,43 @@ DEFAULT_WORLD_STATE = {
     },
     "locations": {
         "foyer": {
-            "title": "Old Foyer",
-            "description": "Dust hangs in slanted light. A scuffed doormat sits by the threshold and an umbrella stand leans beside a coat rack.",
-            "items": ["silver_key", "umbrella_stand", "coat_rack", "side_table", "doormat"],
+            "name": "Old Foyer",
+            "facts": [],
             "exits": {"north": "study", "east": "library", "west": "kitchen"},
             "door_states": {"north": {"locked": True, "description": "locked oak door"}}
         },
         "study": {
-            "title": "Quiet Study", 
-            "description": "A heavy oak desk faces a curtained window; papers and a fountain pen sit neatly arranged.",
-            "items": ["brass_compass", "fountain_pen", "letter_opener", "sealed_envelope", "blotting_paper"],
+            "name": "Quiet Study", 
+            "facts": [],
             "exits": {"south": "foyer", "up": "attic"},
             "door_states": {}
         },
         "library": {
-            "title": "Dusty Library",
-            "description": "Narrow aisles between tall shelves. A rolling step ladder rests against the stacks; a small reading table sits under a dim lamp.",
-            "items": ["leather_journal", "glass_paperweight", "step_ladder", "reading_glasses", "index_cards", "candle_stub"],
+            "name": "Dusty Library",
+            "facts": [],
             "exits": {"west": "foyer"},
             "door_states": {}
         },
         "kitchen": {
-            "title": "Abandoned Kitchen",
-            "description": "Cold stove, hanging utensils, and a faint smell of old spices. A trapdoor’s edges show wear near the center.",
-            "items": ["iron_pot", "dented_kettle", "chipped_mug", "hanging_ladle"],
+            "name": "Abandoned Kitchen",
+            "facts": [],
             "exits": {"east": "foyer", "down": "cellar"},
             "door_states": {"down": {"locked": True, "description": "heavy wooden trapdoor"}}
         },
         "attic": {
-            "title": "Cramped Attic",
-            "description": "Low beams and sloping roof. Dusty crates and a moth-eaten blanket lie near a single round window.",
-            "items": ["golden_locket", "moth_eaten_blanket", "wooden_crate", "broken_frame"],
+            "name": "Cramped Attic",
+            "facts": [],
             "exits": {"down": "study"},
             "door_states": {}
         },
         "cellar": {
-            "title": "Stone Cellar",
-            "description": "Cool stone, low ceiling, and the scent of damp earth. An old wine rack leans against the wall.",
-            "items": ["dusty_bottle", "coal_scuttle", "rusted_hook"],
+            "name": "Stone Cellar",
+            "facts": [],
             "exits": {"up": "kitchen"},
             "door_states": {}
         }
     },
-    "items": {
-        "silver_key": {
-            "title": "Silver Key",
-            "description": "A tarnished silver key with intricate engravings",
-            "can_unlock": ["foyer_north"]
-        },
-        "brass_compass": {
-            "title": "Brass Compass",
-            "description": "An antique compass with a needle that spins mysteriously",
-            "can_unlock": []
-        },
-        "leather_journal": {
-            "title": "Leather Journal",
-            "description": "A weathered journal filled with cryptic notes and sketches",
-            "can_unlock": []
-        },
-        "glass_paperweight": {
-            "title": "Glass Paperweight",
-            "description": "A smooth, heavy glass paperweight with tiny air bubbles inside",
-            "can_unlock": []
-        },
-        "iron_pot": {
-            "title": "Iron Pot",
-            "description": "A heavy cast iron pot, blackened with age",
-            "can_unlock": []
-        },
-        "golden_locket": {
-            "title": "Golden Locket",
-            "description": "An ornate locket that feels warm to the touch",
-            "can_unlock": []
-        },
-        "umbrella_stand": {
-            "title": "Umbrella Stand",
-            "description": "A wrought-iron stand with a faint ring of rust at its base",
-            "can_unlock": []
-        },
-        "coat_rack": {
-            "title": "Coat Rack",
-            "description": "A wooden rack with a couple of empty hooks",
-            "can_unlock": []
-        },
-        "side_table": {
-            "title": "Side Table",
-            "description": "A small table with a scratched surface",
-            "can_unlock": []
-        },
-        "doormat": {
-            "title": "Doormat",
-            "description": "A coir mat with a faded border",
-            "can_unlock": []
-        },
-        "fountain_pen": {
-            "title": "Fountain Pen",
-            "description": "A dark lacquer pen with a fine nib",
-            "can_unlock": []
-        },
-        "letter_opener": {
-            "title": "Letter Opener",
-            "description": "A brass letter opener shaped like a leaf",
-            "can_unlock": []
-        },
-        "sealed_envelope": {
-            "title": "Sealed Envelope",
-            "description": "A cream envelope sealed with burgundy wax",
-            "can_unlock": []
-        },
-        "blotting_paper": {
-            "title": "Blotting Paper",
-            "description": "A square of gently stained blotting paper",
-            "can_unlock": []
-        },
-        "step_ladder": {
-            "title": "Step Ladder",
-            "description": "A small rolling ladder for reaching high shelves",
-            "can_unlock": []
-        },
-        "reading_glasses": {
-            "title": "Reading Glasses",
-            "description": "Wire-framed glasses in need of a wipe",
-            "can_unlock": []
-        },
-        "index_cards": {
-            "title": "Index Cards",
-            "description": "A small stack of cards with penciled annotations",
-            "can_unlock": []
-        },
-        "candle_stub": {
-            "title": "Candle Stub",
-            "description": "A short candle with drips of cooled wax",
-            "can_unlock": []
-        },
-        "dented_kettle": {
-            "title": "Dented Kettle",
-            "description": "A tin kettle with a dented side",
-            "can_unlock": []
-        },
-        "chipped_mug": {
-            "title": "Chipped Mug",
-            "description": "A plain white mug with a chip on the rim",
-            "can_unlock": []
-        },
-        "hanging_ladle": {
-            "title": "Hanging Ladle",
-            "description": "A steel ladle with a looped handle",
-            "can_unlock": []
-        },
-        "moth_eaten_blanket": {
-            "title": "Moth-Eaten Blanket",
-            "description": "A thin wool blanket with small holes",
-            "can_unlock": []
-        },
-        "wooden_crate": {
-            "title": "Wooden Crate",
-            "description": "A light crate with a loose slat",
-            "can_unlock": []
-        },
-        "broken_frame": {
-            "title": "Broken Frame",
-            "description": "A cracked picture frame without its glass",
-            "can_unlock": []
-        },
-        "dusty_bottle": {
-            "title": "Dusty Bottle",
-            "description": "An unlabeled green bottle coated in dust",
-            "can_unlock": []
-        },
-        "coal_scuttle": {
-            "title": "Coal Scuttle",
-            "description": "A small metal scuttle with a wooden handle",
-            "can_unlock": []
-        },
-        "rusted_hook": {
-            "title": "Rusted Hook",
-            "description": "An old iron hook fixed to a beam",
-            "can_unlock": []
-        }
-    },
+    "items": {},
     "npcs": {
         "elena": {
             "location": "library",
@@ -597,6 +455,194 @@ async def mark_npc_as_met(npc_id: str) -> str:
     save_world_state(state)
     
     return f"Player has now met {npc_id}"
+
+
+@mcp.tool()
+async def create_item(item_id: str, name: str, location: str, initial_facts: Optional[List[str]] = None) -> str:
+    """Create a new item in the world.
+    
+    Args:
+        item_id: Unique identifier for the item (e.g., "silver_key")
+        name: Human-readable name (e.g., "Silver Key")  
+        location: Where the item is located (location_id, "player", or npc_id)
+        initial_facts: Optional list of initial facts about the item
+        
+    Returns:
+        Success message or error description
+    """
+    state = load_world_state()
+    
+    if item_id in state.get("items", {}):
+        return f"Error: Item '{item_id}' already exists"
+    
+    # Validate location exists
+    if location != "player" and location not in state.get("locations", {}) and location not in state.get("npcs", {}):
+        return f"Error: Location '{location}' does not exist"
+    
+    state["items"][item_id] = {
+        "name": name,
+        "facts": initial_facts or [],
+        "location": location,
+        "can_unlock": []
+    }
+    
+    save_world_state(state)
+    return f"Created item '{name}' ({item_id}) at {location}"
+
+
+@mcp.tool()
+async def create_npc(npc_id: str, name: str, location: str, initial_facts: Optional[List[str]] = None) -> str:
+    """Create a new NPC in the world.
+    
+    Args:
+        npc_id: Unique identifier for the NPC (e.g., "elena")
+        name: Human-readable name (e.g., "Elena")
+        location: Location where NPC starts
+        initial_facts: Optional list of initial facts about the NPC
+        
+    Returns:
+        Success message or error description
+    """
+    state = load_world_state()
+    
+    if npc_id in state.get("npcs", {}):
+        return f"Error: NPC '{npc_id}' already exists"
+    
+    if location not in state.get("locations", {}):
+        return f"Error: Location '{location}' does not exist"
+    
+    state["npcs"][npc_id] = {
+        "name": name,
+        "location": location,
+        "debug_color": "37",
+        "facts": initial_facts or [],
+        "inventory": [],
+        "recent_thoughts": [],
+        "recent_actions": [],
+        "personality": "",
+        "backstory": "",
+        "memories": []
+    }
+    
+    save_world_state(state)
+    return f"Created NPC '{name}' ({npc_id}) at {location}"
+
+
+@mcp.tool() 
+async def create_location(location_id: str, name: str, exits: Optional[Dict[str, str]] = None) -> str:
+    """Create a new location in the world.
+    
+    Args:
+        location_id: Unique identifier for the location (e.g., "secret_room")
+        name: Human-readable name (e.g., "Secret Room")
+        exits: Optional dictionary of exits {"direction": "location_id"}
+        
+    Returns:
+        Success message or error description
+    """
+    state = load_world_state()
+    
+    if location_id in state.get("locations", {}):
+        return f"Error: Location '{location_id}' already exists"
+    
+    state["locations"][location_id] = {
+        "name": name,
+        "facts": [],
+        "exits": exits or {},
+        "door_states": {}
+    }
+    
+    save_world_state(state)
+    return f"Created location '{name}' ({location_id})"
+
+
+@mcp.tool()
+async def add_location_facts(location_id: str, new_facts: List[str]) -> str:
+    """Add facts to a location.
+    
+    Args:
+        location_id: The location to add facts to
+        new_facts: List of facts to add
+        
+    Returns:
+        Success message or error description
+    """
+    state = load_world_state()
+    
+    if location_id not in state.get("locations", {}):
+        return f"Error: Location '{location_id}' does not exist"
+    
+    location = state["locations"][location_id]
+    existing_facts = location.get("facts", [])
+    
+    # Add all facts - deduplication handled by LLM at attribution level
+    existing_facts.extend(new_facts)
+    location["facts"] = existing_facts
+    save_world_state(state)
+    
+    return f"Added {len(new_facts)} facts to {location_id}: {new_facts}"
+
+
+@mcp.tool()
+async def add_item_facts(item_id: str, new_facts: List[str]) -> str:
+    """Add facts to an item.
+    
+    Args:
+        item_id: The item to add facts to
+        new_facts: List of facts to add
+        
+    Returns:
+        Success message or error description
+    """
+    state = load_world_state()
+    
+    if item_id not in state.get("items", {}):
+        return f"Error: Item '{item_id}' does not exist"
+    
+    item = state["items"][item_id]
+    existing_facts = item.get("facts", [])
+    
+    # Add all facts - deduplication handled by LLM at attribution level
+    existing_facts.extend(new_facts)
+    item["facts"] = existing_facts
+    save_world_state(state)
+    
+    return f"Added {len(new_facts)} facts to {item_id}: {new_facts}"
+
+
+@mcp.tool()
+async def add_npc_facts(npc_id: str, new_facts: List[str]) -> str:
+    """Add facts to an NPC.
+    
+    Args:
+        npc_id: The NPC to add facts to
+        new_facts: List of facts to add
+        
+    Returns:
+        Success message or error description
+    """
+    state = load_world_state()
+    
+    if npc_id not in state.get("npcs", {}):
+        return f"Error: NPC '{npc_id}' does not exist"
+    
+    npc = state["npcs"][npc_id]
+    existing_facts = npc.get("facts", [])
+    
+    # Simple deduplication - exact string matches only
+    added_facts = []
+    for fact in new_facts:
+        if fact not in existing_facts:
+            existing_facts.append(fact)
+            added_facts.append(fact)
+    
+    npc["facts"] = existing_facts
+    save_world_state(state)
+    
+    if added_facts:
+        return f"Added {len(added_facts)} facts to {npc_id}: {added_facts}"
+    else:
+        return f"No new facts added to {npc_id} (all were duplicates)"
 
 
 if __name__ == "__main__":

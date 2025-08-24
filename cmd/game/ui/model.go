@@ -3,6 +3,7 @@ package ui
 import (
     "context"
     "fmt"
+    "strings"
     "time"
     
     tea "github.com/charmbracelet/bubbletea"
@@ -14,6 +15,7 @@ import (
     "textadventure/internal/debug"
     "textadventure/internal/game"
     "textadventure/internal/game/director"
+    "textadventure/internal/game/facts"
     "textadventure/internal/llm"
     "textadventure/internal/logging"
     "textadventure/internal/mcp"
@@ -242,5 +244,144 @@ func (m *Model) endTurn(endReason string) {
         m.turnSpan = nil
         m.turnContext = nil
         m.turnID = ""
+    }
+}
+
+func (m *Model) extractAndAccumulateFacts(narrationText string) {
+    if strings.TrimSpace(narrationText) == "" {
+        return
+    }
+    
+    currentLocation := m.world.Locations[m.world.Location]
+    ctx := m.createGameContext(m.sessionContext, "facts.extract")
+    
+    extractedFacts, err := facts.ExtractLocationFacts(ctx, m.llmService, narrationText, m.world.Location, currentLocation.Facts)
+    if err != nil {
+        if m.loggers.Debug.IsEnabled() {
+            m.loggers.Debug.Printf("Fact extraction failed: %v", err)
+        }
+        return
+    }
+    
+    if len(extractedFacts) > 0 {
+        if m.loggers.Debug.IsEnabled() {
+            debugMsg := fmt.Sprintf("[DEBUG] Facts extracted: %v", extractedFacts)
+            m.loggers.Debug.Printf(debugMsg)
+            m.messages = append(m.messages, debugMsg)
+        }
+        
+        attribution, err := facts.AttributeFacts(ctx, m.llmService, extractedFacts, &m.world)
+        if err != nil {
+            if m.loggers.Debug.IsEnabled() {
+                m.loggers.Debug.Printf("Fact attribution failed: %v", err)
+            }
+            m.world.AccumulateLocationFacts(m.world.Location, extractedFacts)
+            return
+        }
+        
+        m.persistAttributedFacts(attribution)
+        
+        if m.loggers.Debug.IsEnabled() {
+            // Show attribution results
+            for locationID, facts := range attribution.LocationFacts {
+                debugMsg := fmt.Sprintf("[DEBUG] Location %s: %v", locationID, facts)
+                m.loggers.Debug.Printf(debugMsg)
+                m.messages = append(m.messages, debugMsg)
+            }
+            for itemID, facts := range attribution.ItemFacts {
+                debugMsg := fmt.Sprintf("[DEBUG] Item %s: %v", itemID, facts)
+                m.loggers.Debug.Printf(debugMsg)
+                m.messages = append(m.messages, debugMsg)
+            }
+            for npcID, facts := range attribution.NPCFacts {
+                debugMsg := fmt.Sprintf("[DEBUG] NPC %s: %v", npcID, facts)
+                m.loggers.Debug.Printf(debugMsg)
+                m.messages = append(m.messages, debugMsg)
+            }
+            if len(attribution.Skipped) > 0 {
+                debugMsg := fmt.Sprintf("[DEBUG] Skipped: %v", attribution.Skipped)
+                m.loggers.Debug.Printf(debugMsg)
+                m.messages = append(m.messages, debugMsg)
+            }
+        }
+    } else if m.loggers.Debug.IsEnabled() {
+        debugMsg := "[DEBUG] Facts extracted: []"
+        m.loggers.Debug.Printf(debugMsg)
+        m.messages = append(m.messages, debugMsg)
+    }
+}
+
+func (m *Model) persistAttributedFacts(attribution *facts.FactAttribution) {
+    ctx := m.createGameContext(m.sessionContext, "facts.persist")
+    
+    // Persist location facts
+    for locationID, locationFacts := range attribution.LocationFacts {
+        if len(locationFacts) > 0 {
+            result, err := m.mcpClient.CallTool(ctx, "add_location_facts", map[string]interface{}{
+                "location_id": locationID,
+                "new_facts":   locationFacts,
+            })
+            if err != nil && m.loggers.Debug.IsEnabled() {
+                m.loggers.Debug.Printf("Failed to persist location facts for %s: %v", locationID, err)
+            } else if m.loggers.Debug.IsEnabled() {
+                m.loggers.Debug.Printf("Persisted location facts for %s: %s", locationID, result)
+            }
+            
+            // Update local world state
+            if loc, exists := m.world.Locations[locationID]; exists {
+                m.world.Locations[locationID] = game.LocationInfo{
+                    Name:  loc.Name,
+                    Facts: append(loc.Facts, locationFacts...),
+                    Exits: loc.Exits,
+                }
+            }
+        }
+    }
+    
+    // Create items and persist item facts
+    for itemID, itemFacts := range attribution.ItemFacts {
+        if len(itemFacts) > 0 {
+            result, err := m.mcpClient.CallTool(ctx, "create_item", map[string]interface{}{
+                "item_id":       itemID,
+                "name":          itemID, // Use item_id as name for now
+                "location":      m.world.Location,
+                "initial_facts": itemFacts,
+            })
+            if err != nil && m.loggers.Debug.IsEnabled() {
+                // Item might already exist, try adding facts instead
+                result, err = m.mcpClient.CallTool(ctx, "add_item_facts", map[string]interface{}{
+                    "item_id":   itemID,
+                    "new_facts": itemFacts,
+                })
+                if err != nil && m.loggers.Debug.IsEnabled() {
+                    m.loggers.Debug.Printf("Failed to persist item facts for %s: %v", itemID, err)
+                } else if m.loggers.Debug.IsEnabled() {
+                    m.loggers.Debug.Printf("Added facts to existing item %s: %s", itemID, result)
+                }
+            } else if m.loggers.Debug.IsEnabled() {
+                m.loggers.Debug.Printf("Created item %s: %s", itemID, result)
+            }
+        }
+    }
+    
+    // Persist NPC facts
+    for npcID, npcFacts := range attribution.NPCFacts {
+        if len(npcFacts) > 0 {
+            result, err := m.mcpClient.CallTool(ctx, "add_npc_facts", map[string]interface{}{
+                "npc_id":    npcID,
+                "new_facts": npcFacts,
+            })
+            if err != nil && m.loggers.Debug.IsEnabled() {
+                m.loggers.Debug.Printf("Failed to persist NPC facts for %s: %v", npcID, err)
+            } else if m.loggers.Debug.IsEnabled() {
+                m.loggers.Debug.Printf("Persisted NPC facts for %s: %s", npcID, result)
+            }
+            
+            // Update local world state
+            if npc, exists := m.world.NPCs[npcID]; exists {
+                npc.Facts = append(npc.Facts, npcFacts...)
+                m.world.NPCs[npcID] = npc
+            }
+        }
     }
 }

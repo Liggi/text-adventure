@@ -61,7 +61,9 @@ func StartLLMStream(ctx context.Context, llmService *llm.Service, userInput stri
         
         startTime := time.Now()
         worldContext := game.BuildWorldContext(world, gameHistory, actingNPCID...)
-        systemPrompt := buildNarrationPrompt(actionContext, mutationResults, worldEventLines)
+        
+        filteredWorldEventLines := filterEventsForPlayerPerspective(world, worldEventLines, actingNPCID...)
+        systemPrompt := buildNarrationPrompt(actionContext, mutationResults, filteredWorldEventLines)
         
         req := llm.StreamCompletionRequest{
             SystemPrompt: systemPrompt,

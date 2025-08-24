@@ -31,9 +31,8 @@ type Player struct {
 }
 
 type Location struct {
-	Title       string            `json:"title"`
-	Description string            `json:"description"`
-	Items       []string          `json:"items"`
+	Name        string            `json:"name"`
+	Facts       []string          `json:"facts"`
 	Exits       map[string]string `json:"exits"`
 	DoorStates  map[string]Door   `json:"door_states"`
 }
@@ -44,21 +43,23 @@ type Door struct {
 }
 
 type Item struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	CanUnlock   []string `json:"can_unlock"`
+	Name      string   `json:"name"`
+	Facts     []string `json:"facts"`
+	Location  string   `json:"location"`
+	CanUnlock []string `json:"can_unlock"`
 }
 
 type NPC struct {
+	Name          string   `json:"name"`
 	Location      string   `json:"location"`
 	DebugColor    string   `json:"debug_color"`
-	Description   string   `json:"description"`
+	Facts         []string `json:"facts"`
 	Inventory     []string `json:"inventory"`
 	RecentThoughts []string `json:"recent_thoughts"`
 	RecentActions []string `json:"recent_actions"`
 	Personality   string   `json:"personality"`
 	Backstory     string   `json:"backstory"`
-	CoreMemories  []string `json:"core_memories"`
+	Memories      []string `json:"memories"`
 }
 
 func NewWorldStateClient(debug bool) (*WorldStateClient, error) {
@@ -382,5 +383,27 @@ func (w *WorldStateClient) MarkNPCAsMetMethod(ctx context.Context, npcID string)
 		log.Printf("Mark NPC as met result: %s", response)
 	}
 	
+	return response, nil
+}
+
+func (w *WorldStateClient) CallTool(ctx context.Context, toolName string, arguments map[string]interface{}) (string, error) {
+	params := &mcp.CallToolParams{
+		Name:      toolName,
+		Arguments: arguments,
+	}
+
+	result, err := w.session.CallTool(ctx, params)
+	if err != nil {
+		return "", fmt.Errorf("failed to call tool %s: %w", toolName, err)
+	}
+
+	response := result.Content[0].(*mcp.TextContent).Text
+	if result.IsError {
+		return response, fmt.Errorf(response)
+	}
+	if w.debug {
+		log.Printf("Tool %s result: %s", toolName, response)
+	}
+
 	return response, nil
 }

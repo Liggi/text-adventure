@@ -8,7 +8,7 @@ run:
 dev:
 	@./scripts/dev.sh
 
-debug:
+debug: reset cleanlogs
 	@./scripts/debug.sh
 
 build:

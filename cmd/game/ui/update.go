@@ -53,16 +53,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleInitialLook(msg initialLookAroundMsg) (tea.Model, tea.Cmd) {
 	if !m.loading && m.mcpClient != nil {
-		userInput := "look around"
+		userInput := "awakening"
 		m.gameHistory.AddPlayerAction(userInput)
 		m.loading = true
 		m.animationFrame = 0
 		m.messages = append(m.messages, "LOADING_ANIMATION")
 		m.turnPhase = Narration
 		
-        // Start a new turn span and context
         (&m).startTurn()
-        ctx := m.createGameContext(m.turnContext, "director.initial_look")
+        ctx := m.createGameContext(m.turnContext, "director.awakening_intro")
         return m, tea.Batch(m.director.ProcessPlayerActionWithContext(ctx, userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
     }
     return m, nil
@@ -223,8 +222,9 @@ func (m Model) handleStreamComplete(msg narration.StreamCompleteMsg) (tea.Model,
         }
 
         if m.turnPhase == Narration {
+            m.extractAndAccumulateFacts(m.currentResponse)
+            
             m.turnPhase = PlayerTurn
-            // End the turn span as narration completes the turn
             (&m).endTurn("narration_complete")
         }
         return m, nil
@@ -354,7 +354,7 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.messages = append(m.messages, fmt.Sprintf("[DEBUG] Player Inventory: %v", m.world.Inventory))
 					m.messages = append(m.messages, fmt.Sprintf("[DEBUG] Available Locations: %v", getLocationList(m.world)))
 					for locID, loc := range m.world.Locations {
-						m.messages = append(m.messages, fmt.Sprintf("[DEBUG] %s: %s (Items: %v, Exits: %v)", locID, loc.Title, loc.Items, loc.Exits))
+						m.messages = append(m.messages, fmt.Sprintf("[DEBUG] %s: %s (Facts: %v, Exits: %v)", locID, loc.Name, loc.Facts, loc.Exits))
 					}
 				case "/help":
 					m.messages = append(m.messages, "[DEBUG] Available commands:")

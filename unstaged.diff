@@ -1,0 +1,603 @@
+diff --git a/cmd/game/app.go b/cmd/game/app.go
+index a8f6e95..f5e6948 100644
+--- a/cmd/game/app.go
++++ b/cmd/game/app.go
+@@ -72,6 +72,7 @@ func createApp() (ui.Model, func(), error) {
+ 	model := ui.NewModel(llmService, mcpClient, loggers, world)
+ 	
+ 	cleanup := func() {
++		model.Cleanup()
+ 		if tracerProvider != nil {
+ 			tracerProvider.Shutdown(context.Background())
+ 		}
+diff --git a/cmd/game/ui/model.go b/cmd/game/ui/model.go
+index 50ce56c..aa9e3f6 100644
+--- a/cmd/game/ui/model.go
++++ b/cmd/game/ui/model.go
+@@ -1,9 +1,15 @@
+ package ui
+ 
+ import (
++	"context"
+ 	"fmt"
++	"time"
+ 	
+ 	tea "github.com/charmbracelet/bubbletea"
++	"github.com/google/uuid"
++	"go.opentelemetry.io/otel"
++	"go.opentelemetry.io/otel/attribute"
++	"go.opentelemetry.io/otel/trace"
+ 	
+ 	"textadventure/internal/debug"
+ 	"textadventure/internal/game"
+@@ -27,6 +33,19 @@ const (
+ 	Narration
+ )
+ 
++func (tp TurnPhase) String() string {
++	switch tp {
++	case PlayerTurn:
++		return "player_turn"
++	case NPCTurns:
++		return "npc_turns"
++	case Narration:
++		return "narration"
++	default:
++		return "unknown"
++	}
++}
++
+ type Model struct {
+ 	messages                []string
+ 	input                   string
+@@ -47,6 +66,10 @@ type Model struct {
+ 	turnPhase               TurnPhase
+ 	npcTurnComplete         bool
+ 	accumulatedSensoryEvents []sensory.SensoryEvent
++	sessionID               string
++	sessionStartTime        time.Time
++	sessionContext          context.Context
++	sessionSpan             trace.Span
+ }
+ 
+ func NewModel(
+@@ -56,10 +79,27 @@ func NewModel(
+ 	world game.WorldState,
+ ) Model {
+ 	messages := []string{}
++	sessionID := uuid.New().String()
++	sessionStartTime := time.Now()
++	
++	tracer := otel.Tracer("text-adventure-ui")
++	sessionCtx, sessionSpan := tracer.Start(context.Background(), "game-session",
++		trace.WithAttributes(
++			attribute.String("langfuse.session.id", sessionID),
++			attribute.String("session.id", sessionID),
++			attribute.String("langfuse.trace.name", "text-adventure"),
++			attribute.String("langfuse.trace.metadata.session_id", sessionID),
++			attribute.String("game.initial_location", world.Location),
++			attribute.Int("game.initial_inventory_count", len(world.Inventory)),
++			attribute.String("langfuse.trace.tags", "game,session"),
++		),
++	)
++	
+ 	if loggers.Debug.IsEnabled() {
+ 		messages = append(messages, "[DEBUG] MCP integration active - world state loaded from server")
+ 		messages = append(messages, fmt.Sprintf("[DEBUG] Player location: %s, Inventory: %v", world.Location, world.Inventory))
+ 		messages = append(messages, "[DEBUG] Debug commands: /worldstate, /help")
++		messages = append(messages, fmt.Sprintf("[DEBUG] Session ID: %s", sessionID[:8]))
+ 		messages = append(messages, "")
+ 	}
+ 	
+@@ -76,6 +116,10 @@ func NewModel(
+ 		turnPhase:               PlayerTurn,
+ 		npcTurnComplete:         false,
+ 		accumulatedSensoryEvents: []sensory.SensoryEvent{},
++		sessionID:               sessionID,
++		sessionStartTime:        sessionStartTime,
++		sessionContext:          sessionCtx,
++		sessionSpan:             sessionSpan,
+ 	}
+ }
+ 
+@@ -120,4 +164,36 @@ func startNarrationCmd(world game.WorldState, gameHistory []string, debug bool)
+ 			debug:       debug,
+ 		}
+ 	}
++}
++
++func (m Model) createGameContext(ctx context.Context, operationType string) context.Context {
++	sessionDuration := time.Since(m.sessionStartTime)
++	
++	gameCtx := map[string]interface{}{
++		"location":         m.world.Location,
++		"inventory_count":  len(m.world.Inventory),
++		"turn_phase":       m.turnPhase.String(),
++		"session_duration": int(sessionDuration.Minutes()),
++	}
++	
++	if len(m.world.Inventory) > 0 {
++		gameCtx["inventory"] = m.world.Inventory
++	}
++	
++	enrichedCtx := llm.WithSessionID(ctx, m.sessionID)
++	enrichedCtx = llm.WithOperationType(enrichedCtx, operationType)
++	enrichedCtx = llm.WithGameContext(enrichedCtx, gameCtx)
++	
++	return enrichedCtx
++}
++
++func (m Model) Cleanup() {
++	if m.sessionSpan != nil {
++		sessionDuration := time.Since(m.sessionStartTime)
++		m.sessionSpan.SetAttributes(
++			attribute.Int64("game.session_duration_seconds", int64(sessionDuration.Seconds())),
++			attribute.String("game.session_end_reason", "normal_exit"),
++		)
++		m.sessionSpan.End()
++	}
+ }
+\ No newline at end of file
+diff --git a/cmd/game/ui/update.go b/cmd/game/ui/update.go
+index 428f540..5015a90 100644
+--- a/cmd/game/ui/update.go
++++ b/cmd/game/ui/update.go
+@@ -59,7 +59,8 @@ func (m Model) handleInitialLook(msg initialLookAroundMsg) (tea.Model, tea.Cmd)
+ 		m.messages = append(m.messages, "LOADING_ANIMATION")
+ 		m.turnPhase = Narration
+ 		
+-		return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
++		ctx := m.createGameContext(m.sessionContext, "director_initial_look")
++		return m, tea.Batch(m.director.ProcessPlayerActionWithContext(ctx, userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
+ 	}
+ 	return m, nil
+ }
+@@ -79,7 +80,8 @@ func (m Model) handleNarrationTurn(msg narrationTurnMsg) (tea.Model, tea.Cmd) {
+ 		m.messages = append(m.messages, "LOADING_ANIMATION")
+ 		
+ 		userInput := "narrate recent events"
+-		return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
++		ctx := m.createGameContext(m.sessionContext, "director_narration")
++		return m, tea.Batch(m.director.ProcessPlayerActionWithContext(ctx, userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
+ 	}
+ 	return m, nil
+ }
+@@ -148,9 +150,10 @@ func (m Model) handleNPCAction(msg actors.NPCActionMsg) (tea.Model, tea.Cmd) {
+ 		m.animationFrame = 0
+ 		m.messages = append(m.messages, "LOADING_ANIMATION")
+ 		
++		ctx := m.createGameContext(m.sessionContext, "director_npc_action")
+ 		return m, tea.Batch(
+ 			updateMemoryCmd,
+-			m.director.ProcessPlayerAction(msg.Action, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, msg.NPCID), 
++			m.director.ProcessPlayerActionWithContext(ctx, msg.Action, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, msg.NPCID), 
+ 			animationTimer(),
+ 		)
+ 	}
+@@ -382,7 +385,8 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+ 			m.messages = append(m.messages, "LOADING_ANIMATION")
+ 			m.turnPhase = PlayerTurn
+ 			
+-			return m, tea.Batch(m.director.ProcessPlayerAction(userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
++			ctx := m.createGameContext(m.sessionContext, "director_player_input")
++			return m, tea.Batch(m.director.ProcessPlayerActionWithContext(ctx, userInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion), animationTimer())
+ 		}
+ 		return m, nil
+ 
+diff --git a/internal/game/actors/npc.go b/internal/game/actors/npc.go
+index 33bc872..6cc87b6 100644
+--- a/internal/game/actors/npc.go
++++ b/internal/game/actors/npc.go
+@@ -94,7 +94,12 @@ func GenerateNPCThoughts(llmService *llm.Service, npcID string, world game.World
+ 			MaxTokens:    150,
+ 		}
+ 
+-		thoughts, err := llmService.CompleteText(context.Background(), req)
++		ctx := llm.WithOperationType(context.Background(), "npc_thoughts")
++		ctx = llm.WithGameContext(ctx, map[string]interface{}{
++			"npc_id":   npcID,
++			"location": world.NPCs[npcID].Location,
++		})
++		thoughts, err := llmService.CompleteText(ctx, req)
+ 		if err != nil {
+ 			return NPCThoughtsMsg{
+ 				NPCID:    npcID,
+@@ -135,7 +140,13 @@ func GenerateNPCAction(llmService *llm.Service, npcID string, npcThoughts string
+ 		MaxTokens:    100,
+ 	}
+ 
+-	action, err := llmService.CompleteText(context.Background(), req)
++	ctx := llm.WithOperationType(context.Background(), "npc_action")
++	ctx = llm.WithGameContext(ctx, map[string]interface{}{
++		"npc_id":      npcID,
++		"location":    world.NPCs[npcID].Location,
++		"has_thoughts": len(npcThoughts) > 0,
++	})
++	action, err := llmService.CompleteText(ctx, req)
+ 	if err != nil {
+ 		return "", err
+ 	}
+diff --git a/internal/game/director/director.go b/internal/game/director/director.go
+index 3f291f2..e092a41 100644
+--- a/internal/game/director/director.go
++++ b/internal/game/director/director.go
+@@ -80,14 +80,17 @@ func (b *IntentBuilder) WithLogger(logger *logging.CompletionLogger) *IntentBuil
+ 	return b
+ }
+ 
+-// Execute processes the configured intent and returns a Bubble Tea command.
+-// Panics if WithWorld() was not called.
+ func (b *IntentBuilder) Execute() tea.Cmd {
++	return b.ExecuteWithContext(context.Background())
++}
++
++func (b *IntentBuilder) ExecuteWithContext(ctx context.Context) tea.Cmd {
+ 	if b.world == nil {
+ 		panic("world state required - call WithWorld() before Execute()")
+ 	}
+ 	
+-	return b.director.ProcessPlayerAction(
++	return b.director.ProcessPlayerActionWithContext(
++		ctx,
+ 		b.intent,
+ 		*b.world,
+ 		b.history,
+@@ -173,13 +176,13 @@ func (d *Director) ExecuteIntent(ctx context.Context, userInput string, world ga
+ 	return d.executeWithRetry(ctx, userInput, world, gameHistory, actingNPCID, actionPlan.Mutations)
+ }
+ 
+-// ProcessPlayerAction is the main entry point for processing user actions.
+-// It handles the complete flow from intent interpretation through world state updates
+-// and sensory event generation, returning a Bubble Tea message.
+ func (d *Director) ProcessPlayerAction(userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, actingNPCID ...string) tea.Cmd {
++	ctx := context.Background()
++	return d.ProcessPlayerActionWithContext(ctx, userInput, world, gameHistory, logger, actingNPCID...)
++}
++
++func (d *Director) ProcessPlayerActionWithContext(ctx context.Context, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, actingNPCID ...string) tea.Cmd {
+ 	return func() tea.Msg {
+-		ctx := context.Background()
+-		
+ 		var npcID string
+ 		if len(actingNPCID) > 0 {
+ 			npcID = actingNPCID[0]
+diff --git a/internal/game/director/mcp_executor.go b/internal/game/director/mcp_executor.go
+index 65a111e..22d27a0 100644
+--- a/internal/game/director/mcp_executor.go
++++ b/internal/game/director/mcp_executor.go
+@@ -4,9 +4,14 @@ import (
+ 	"context"
+ 	"fmt"
+ 
++	"go.opentelemetry.io/otel"
++	"go.opentelemetry.io/otel/attribute"
++	"go.opentelemetry.io/otel/trace"
++
+ 	"textadventure/internal/debug"
+ 	"textadventure/internal/game"
+ 	"textadventure/internal/mcp"
++	"textadventure/internal/observability"
+ )
+ 
+ type MutationRequest struct {
+@@ -15,35 +20,80 @@ type MutationRequest struct {
+ }
+ 
+ func ExecuteMutations(ctx context.Context, mutations []MutationRequest, mcpClient *mcp.WorldStateClient, debugLogger *debug.Logger, world game.WorldState, actingNPCID string) ([]string, []string) {
++	tracer := otel.Tracer("mcp-executor")
++	
++	attrs := []attribute.KeyValue{
++		attribute.Int("mutation_count", len(mutations)),
++		attribute.String("player_location", world.Location),
++		attribute.String("acting_npc", actingNPCID),
++	}
++	
++	if sessionID := observability.GetSessionIDFromContext(ctx); sessionID != "" {
++		attrs = append(attrs, 
++			attribute.String("langfuse.session.id", sessionID),
++			attribute.String("session.id", sessionID),
++		)
++	}
++	
++	ctx, span := tracer.Start(ctx, "mcp.execute_mutations",
++		trace.WithAttributes(attrs...),
++	)
++	defer span.End()
++	
+ 	var successes []string
+ 	var failures []string
+ 	
+-	for _, mutation := range mutations {
++	for i, mutation := range mutations {
++		_, mutSpan := tracer.Start(ctx, "mcp.execute_tool",
++			trace.WithAttributes(
++				attribute.String("tool_name", mutation.Tool),
++				attribute.Int("mutation_index", i),
++			),
++		)
++		
+ 		tool, exists := GetTool(mutation.Tool)
+ 		if !exists {
+ 			failure := fmt.Sprintf("Unknown tool: %s", mutation.Tool)
+ 			failures = append(failures, failure)
++			mutSpan.SetAttributes(attribute.String("error_type", "tool_not_found"))
++			mutSpan.End()
+ 			continue
+ 		}
+ 		
+ 		if err := tool.Validate(mutation.Args); err != nil {
+ 			failure := fmt.Sprintf("Invalid args for %s: %v", mutation.Tool, err)
+ 			failures = append(failures, failure)
++			mutSpan.SetAttributes(attribute.String("error_type", "validation_failed"))
++			mutSpan.RecordError(err)
++			mutSpan.End()
+ 			continue
+ 		}
+ 		
+ 		if err := tool.Execute(ctx, mutation.Args, mcpClient, world, actingNPCID); err != nil {
+ 			failure := fmt.Sprintf("Failed to execute %s: %v", mutation.Tool, err)
+ 			failures = append(failures, failure)
++			mutSpan.SetAttributes(attribute.String("error_type", "execution_failed"))
++			mutSpan.RecordError(err)
+ 		} else {
+ 			success := tool.SuccessMessage(mutation.Args, actingNPCID)
+ 			successes = append(successes, success)
++			mutSpan.SetAttributes(attribute.String("result", "success"))
+ 		}
++		mutSpan.End()
+ 	}
+ 	
+ 	if len(failures) > 0 {
+ 		debugLogger.Printf("%d mutations failed", len(failures))
++		span.SetAttributes(
++			attribute.Int("failure_count", len(failures)),
++			attribute.StringSlice("failures", failures),
++		)
+ 	}
+ 	
++	span.SetAttributes(
++		attribute.Int("success_count", len(successes)),
++		attribute.StringSlice("successes", successes),
++	)
++	
+ 	return successes, failures
+ }
+diff --git a/internal/game/sensory/events.go b/internal/game/sensory/events.go
+index df74d2d..118774f 100644
+--- a/internal/game/sensory/events.go
++++ b/internal/game/sensory/events.go
+@@ -55,7 +55,12 @@ func GenerateSensoryEvents(llmService *llm.Service, userInput string, successful
+ 		MaxTokens:    400,
+ 	}
+ 
+-	content, err := llmService.CompleteJSON(context.Background(), req)
++	ctx := llm.WithOperationType(context.Background(), "sensory_events")
++	ctx = llm.WithGameContext(ctx, map[string]interface{}{
++		"player_location": world.Location,
++		"mutation_count":  len(successfulMutations),
++	})
++	content, err := llmService.CompleteJSON(ctx, req)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("sensory event generation failed: %w", err)
+ 	}
+diff --git a/internal/llm/service.go b/internal/llm/service.go
+index 7fe59ed..db477ad 100644
+--- a/internal/llm/service.go
++++ b/internal/llm/service.go
+@@ -13,6 +13,15 @@ import (
+ 	"textadventure/internal/observability"
+ )
+ 
++// Context keys for operation tracing
++type contextKey string
++
++const (
++	operationTypeKey contextKey = "operation_type"
++	gameContextKey   contextKey = "game_context"
++	sessionIDKey     contextKey = "session_id"
++)
++
+ type Service struct {
+ 	client *openai.Client
+ 	model  string
+@@ -48,6 +57,20 @@ type StreamCompletionRequest struct {
+ }
+ 
+ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (string, error) {
++	operationType := "text_completion"
++	if opType := getOperationType(ctx); opType != "" {
++		operationType = opType
++	}
++	
++	sc := trace.SpanFromContext(ctx).SpanContext()
++	if s.debug != nil {
++		if !sc.IsValid() {
++			s.debug.Printf("NO PARENT: ctx missing active span for %s", operationType)
++		} else {
++			s.debug.Printf("CompleteText trace=%s parentSpan=%s op=%s", sc.TraceID(), sc.SpanID(), operationType)
++		}
++	}
++	
+ 	ctx, span := s.tracer.Start(ctx, "llm.complete_text",
+ 		trace.WithSpanKind(trace.SpanKindClient),
+ 		trace.WithAttributes(
+@@ -56,10 +79,33 @@ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (
+ 	)
+ 	defer span.End()
+ 
+-	span.SetAttributes(
++	attrs := []attribute.KeyValue{
+ 		attribute.Int("gen_ai.request.max_tokens", req.MaxTokens),
+ 		attribute.String("langfuse.observation.type", "generation"),
+-	)
++		attribute.String("game.operation_type", operationType),
++	}
++	
++	if sessionID := getSessionID(ctx); sessionID != "" {
++		attrs = append(attrs, 
++			attribute.String("langfuse.session.id", sessionID),
++			attribute.String("session.id", sessionID),
++		)
++	}
++	
++	if gameCtx := getGameContext(ctx); gameCtx != nil {
++		for k, v := range gameCtx {
++			switch val := v.(type) {
++			case string:
++				attrs = append(attrs, attribute.String("game."+k, val))
++			case int:
++				attrs = append(attrs, attribute.Int("game."+k, val))
++			case []string:
++				attrs = append(attrs, attribute.StringSlice("game."+k, val))
++			}
++		}
++	}
++	
++	span.SetAttributes(attrs...)
+ 
+ 	span.AddEvent("gen_ai.user.message", trace.WithAttributes(
+ 		attribute.String("gen_ai.system", "openai"),
+@@ -130,6 +176,20 @@ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (
+ }
+ 
+ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (string, error) {
++	operationType := "json_completion"
++	if opType := getOperationType(ctx); opType != "" {
++		operationType = opType
++	}
++	
++	sc := trace.SpanFromContext(ctx).SpanContext()
++	if s.debug != nil {
++		if !sc.IsValid() {
++			s.debug.Printf("NO PARENT: ctx missing active span for %s", operationType)
++		} else {
++			s.debug.Printf("CompleteJSON trace=%s parentSpan=%s op=%s", sc.TraceID(), sc.SpanID(), operationType)
++		}
++	}
++	
+ 	ctx, span := s.tracer.Start(ctx, "llm.complete_json",
+ 		trace.WithSpanKind(trace.SpanKindClient),
+ 		trace.WithAttributes(
+@@ -138,11 +198,34 @@ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (
+ 	)
+ 	defer span.End()
+ 
+-	span.SetAttributes(
++	attrs := []attribute.KeyValue{
+ 		attribute.Int("gen_ai.request.max_tokens", req.MaxTokens),
+ 		attribute.String("langfuse.observation.type", "generation"),
+ 		attribute.String("response_format", "json"),
+-	)
++		attribute.String("game.operation_type", operationType),
++	}
++	
++	if sessionID := getSessionID(ctx); sessionID != "" {
++		attrs = append(attrs, 
++			attribute.String("langfuse.session.id", sessionID),
++			attribute.String("session.id", sessionID),
++		)
++	}
++	
++	if gameCtx := getGameContext(ctx); gameCtx != nil {
++		for k, v := range gameCtx {
++			switch val := v.(type) {
++			case string:
++				attrs = append(attrs, attribute.String("game."+k, val))
++			case int:
++				attrs = append(attrs, attribute.Int("game."+k, val))
++			case []string:
++				attrs = append(attrs, attribute.StringSlice("game."+k, val))
++			}
++		}
++	}
++	
++	span.SetAttributes(attrs...)
+ 
+ 	span.AddEvent("gen_ai.user.message", trace.WithAttributes(
+ 		attribute.String("gen_ai.system", "openai"),
+@@ -215,6 +298,36 @@ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (
+ 	return content, nil
+ }
+ 
++func WithOperationType(ctx context.Context, opType string) context.Context {
++	return context.WithValue(ctx, operationTypeKey, opType)
++}
++
++func WithGameContext(ctx context.Context, gameCtx map[string]interface{}) context.Context {
++	return context.WithValue(ctx, gameContextKey, gameCtx)
++}
++
++func WithSessionID(ctx context.Context, sessionID string) context.Context {
++	return context.WithValue(ctx, observability.GetSessionIDKey(), sessionID)
++}
++
++func getOperationType(ctx context.Context) string {
++	if opType, ok := ctx.Value(operationTypeKey).(string); ok {
++		return opType
++	}
++	return ""
++}
++
++func getGameContext(ctx context.Context) map[string]interface{} {
++	if gameCtx, ok := ctx.Value(gameContextKey).(map[string]interface{}); ok {
++		return gameCtx
++	}
++	return nil
++}
++
++func getSessionID(ctx context.Context) string {
++	return observability.GetSessionIDFromContext(ctx)
++}
++
+ func (s *Service) CompleteStream(ctx context.Context, req StreamCompletionRequest) (*openai.ChatCompletionStream, error) {
+ 	openaiReq := openai.ChatCompletionRequest{
+ 		Model: s.model,
+diff --git a/internal/observability/tracer.go b/internal/observability/tracer.go
+index b966e29..d8119e2 100644
+--- a/internal/observability/tracer.go
++++ b/internal/observability/tracer.go
+@@ -60,6 +60,7 @@ func InitTracing(ctx context.Context, config Config) (*TracerProvider, error) {
+ 			sdktrace.WithMaxExportBatchSize(100),
+ 		),
+ 		sdktrace.WithResource(res),
++		sdktrace.WithSpanProcessor(sessionInjector{}),
+ 		// Sample all traces in development, adjust for production
+ 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+ 	)
+@@ -207,4 +208,33 @@ func CreateGenAIAttributes(system, model string, inputTokens, outputTokens int,
+ 	}
+ 	
+ 	return attrs
+-}
+\ No newline at end of file
++}
++
++type sessionInjector struct{}
++
++func (sessionInjector) OnStart(ctx context.Context, s sdktrace.ReadWriteSpan) {
++	if sid := GetSessionIDFromContext(ctx); sid != "" {
++		s.SetAttributes(
++			attribute.String("langfuse.session.id", sid),
++			attribute.String("session.id", sid),
++		)
++	}
++}
++
++type contextKey string
++const sessionIDKey contextKey = "session_id"
++
++func GetSessionIDFromContext(ctx context.Context) string {
++	if sessionID, ok := ctx.Value(sessionIDKey).(string); ok {
++		return sessionID
++	}
++	return ""
++}
++
++func GetSessionIDKey() contextKey {
++	return sessionIDKey
++}
++
++func (sessionInjector) OnEnd(s sdktrace.ReadOnlySpan) {}
++func (sessionInjector) Shutdown(context.Context) error { return nil }
++func (sessionInjector) ForceFlush(context.Context) error { return nil }
+\ No newline at end of file

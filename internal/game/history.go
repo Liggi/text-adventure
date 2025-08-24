@@ -61,8 +61,15 @@ func BuildWorldContext(world WorldState, gameHistory []string, actingNPCID ...st
 		npcID := actingNPCID[0]
         if npc, exists := world.NPCs[npcID]; exists {
             currentLoc := world.Locations[npc.Location]
-            context.WriteString(fmt.Sprintf("NPC %s Location: %s (%s)\n", npcID, currentLoc.Title, npc.Location))
-            context.WriteString(currentLoc.Description + "\n")
+            context.WriteString(fmt.Sprintf("NPC %s Location: %s\n", npcID, currentLoc.Name))
+            
+            // Show established facts about the location
+            if len(currentLoc.Facts) > 0 {
+                context.WriteString("Established Facts:\n")
+                for _, fact := range currentLoc.Facts {
+                    context.WriteString(fmt.Sprintf("- %s\n", fact))
+                }
+            }
 
             // People context first
             if world.Location == npc.Location {
@@ -82,14 +89,19 @@ func BuildWorldContext(world WorldState, gameHistory []string, actingNPCID ...st
             // Navigation next
             context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
 
-            // Items last (least salient)
-            context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
         }
 	} else {
 		// Player perspective
 		currentLoc := world.Locations[world.Location]
-		context.WriteString("Player Location: " + currentLoc.Title + " (" + world.Location + ")\n")
-        context.WriteString(currentLoc.Description + "\n")
+		context.WriteString("Player Location: " + currentLoc.Name + "\n")
+        
+        // Show established facts about the location
+        if len(currentLoc.Facts) > 0 {
+            context.WriteString("Established Facts:\n")
+            for _, fact := range currentLoc.Facts {
+                context.WriteString(fmt.Sprintf("- %s\n", fact))
+            }
+        }
         // People context first
         var npcsHere []string
         for npcID, npc := range world.NPCs {
@@ -119,7 +131,6 @@ func BuildWorldContext(world WorldState, gameHistory []string, actingNPCID ...st
         context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
         // Inventory and items last
         context.WriteString(fmt.Sprintf("Player Inventory: %v\n", world.Inventory))
-        context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
 	}
 	
 	

@@ -7,10 +7,9 @@ func MCPToGameWorldState(mcpWorld *WorldState) game.WorldState {
 	
 	for locID, mcpLoc := range mcpWorld.Locations {
 		gameLocations[locID] = game.LocationInfo{
-			Title:       mcpLoc.Title,
-			Description: mcpLoc.Description,
-			Items:       mcpLoc.Items,
-			Exits:       mcpLoc.Exits,
+			Name:  mcpLoc.Name,
+			Facts: mcpLoc.Facts,
+			Exits: mcpLoc.Exits,
 		}
 	}
 	
@@ -19,13 +18,14 @@ func MCPToGameWorldState(mcpWorld *WorldState) game.WorldState {
 		gameNPCs[npcID] = game.NPCInfo{
 			Location:       mcpNPC.Location,
 			DebugColor:     mcpNPC.DebugColor,
-			Description:    mcpNPC.Description,
+			Description:    mcpNPC.Name,
 			Inventory:      mcpNPC.Inventory,
 			RecentThoughts: mcpNPC.RecentThoughts,
 			RecentActions:  mcpNPC.RecentActions,
 			Personality:    mcpNPC.Personality,
 			Backstory:      mcpNPC.Backstory,
-			CoreMemories:   mcpNPC.CoreMemories,
+			Memories:       mcpNPC.Memories,
+			Facts:          mcpNPC.Facts,
 		}
 	}
 	
@@ -43,11 +43,26 @@ func GameToMCPWorldState(gameWorld game.WorldState) *WorldState {
 	
 	for locID, gameLoc := range gameWorld.Locations {
 		mcpLocations[locID] = Location{
-			Title:       gameLoc.Title,
-			Description: gameLoc.Description,
-			Items:       gameLoc.Items,
-			Exits:       gameLoc.Exits,
-			DoorStates:  make(map[string]Door),
+			Name:       gameLoc.Name,
+			Facts:      gameLoc.Facts,
+			Exits:      gameLoc.Exits,
+			DoorStates: make(map[string]Door),
+		}
+	}
+	
+	mcpNPCs := make(map[string]NPC)
+	for npcID, gameNPC := range gameWorld.NPCs {
+		mcpNPCs[npcID] = NPC{
+			Name:           gameNPC.Description,
+			Location:       gameNPC.Location,
+			DebugColor:     gameNPC.DebugColor,
+			Facts:          gameNPC.Facts,
+			Inventory:      gameNPC.Inventory,
+			RecentThoughts: gameNPC.RecentThoughts,
+			RecentActions:  gameNPC.RecentActions,
+			Personality:    gameNPC.Personality,
+			Backstory:      gameNPC.Backstory,
+			Memories:       gameNPC.Memories,
 		}
 	}
 	
@@ -55,8 +70,10 @@ func GameToMCPWorldState(gameWorld game.WorldState) *WorldState {
 		Player: Player{
 			Location:  gameWorld.Location,
 			Inventory: gameWorld.Inventory,
+			MetNPCs:   gameWorld.MetNPCs,
 		},
 		Locations: mcpLocations,
 		Items:     make(map[string]Item),
+		NPCs:      mcpNPCs,
 	}
 }
