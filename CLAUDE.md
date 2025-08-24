@@ -55,6 +55,32 @@ Example LLM response format:
 - World state is always authoritative source of truth
 - Debug logging shows both narration and executed mutations
 
+## Observability & Tracing
+
+### Langfuse Integration
+
+The game integrates with Langfuse for LLM observability, performance monitoring, and session analysis.
+
+**Setup:**
+1. **Start Langfuse locally**: Navigate to `../langfuse/` and run `docker-compose up -d`
+2. **Configure API keys**: Source the tracing environment with `source .env.tracing`
+3. **Verify connection**: Run `./scripts/langfuse_probe.sh` to test API access
+
+**Key Files:**
+- `.env.tracing` - Contains Langfuse API credentials (update when keys change)
+- `scripts/langfuse_probe.sh` - Diagnostics script for checking traces
+- `internal/observability/tracer.go` - OpenTelemetry integration with Langfuse
+
+**API Key Management:**
+- Get current keys from Langfuse UI at http://localhost:3001 → Project Settings
+- Update `.env.tracing` with correct `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
+- Keys are read from environment variables at runtime via `LoadConfigFromEnv()`
+
+**Performance Analysis:**
+- Use `./scripts/langfuse_probe.sh [limit]` to view recent traces
+- Monitor operation timings for LLM calls (facts extraction, NPC behavior, etc.)
+- All high-frequency operations use `ReasoningEffort: "minimal"` for optimal latency
+
 ## Commit Message Style
 
 - Use one-liner format: `[tag] brief description`
