@@ -115,15 +115,16 @@ type ExecutionResult struct {
 
 // MutationsGeneratedMsg is the Bubble Tea message sent after processing player actions.
 type MutationsGeneratedMsg struct {
-	Mutations     []string
-	Successes     []string
-	Failures      []string
-	SensoryEvents *sensory.SensoryEventResponse
-	NewWorld      game.WorldState
-	UserInput     string
-	Debug         bool
-	ActingNPCID   string
-	ActionContext string // What the actor did (for narrator context)
+    Mutations     []string
+    Successes     []string
+    Failures      []string
+    SensoryEvents *sensory.SensoryEventResponse
+    WorldEventLines []string
+    NewWorld      game.WorldState
+    UserInput     string
+    Debug         bool
+    ActingNPCID   string
+    ActionContext string // What the actor did (for narrator context)
 }
 
 // InterpretIntent uses the LLM to understand user input and generate an action plan.
@@ -216,20 +217,11 @@ func (d *Director) ProcessPlayerActionWithContext(ctx context.Context, userInput
         } else {
             newWorld = mcp.MCPToGameWorldState(mcpWorld)
         }
-        
-        sensoryEvents, err := sensory.GenerateSensoryEvents(ctx, d.llmService, userInput, executionResult.Successes, newWorld, d.debugLogger, npcID)
-        if err != nil {
-            sensoryEvents = &sensory.SensoryEventResponse{AuditoryEvents: []sensory.SensoryEvent{}}
-        }
-        
-        if d.debugLogger != nil && len(sensoryEvents.AuditoryEvents) > 0 {
-			d.debugLogger.Printf("=== SENSORY EVENTS GENERATED ===")
-			for _, event := range sensoryEvents.AuditoryEvents {
-				d.debugLogger.Printf("🔊 %s (%s) at %s", event.Description, event.Volume, event.Location)
-			}
-		}
-		
-		var allMessages []string
+
+        // Summarize canonical world event lines for this turn using the LLM
+        worldEventLines := d.summarizeTurnEvents(ctx, userInput, npcID, world, newWorld, executionResult.Successes, executionResult.Failures)
+
+        var allMessages []string
 		if d.debugLogger != nil && d.debugLogger.IsEnabled() {
 			allMessages = append(allMessages, "[MUTATIONS]")
 			if len(executionResult.Successes) > 0 {
@@ -262,7 +254,8 @@ func (d *Director) ProcessPlayerActionWithContext(ctx context.Context, userInput
             Mutations:     allMessages,
             Successes:     executionResult.Successes,
             Failures:      executionResult.Failures,
-            SensoryEvents: sensoryEvents,
+            SensoryEvents: nil,
+            WorldEventLines: worldEventLines,
             NewWorld:      newWorld,
             UserInput:     userInput,
             Debug:         d.debugLogger.IsEnabled(),
@@ -309,8 +302,80 @@ func (d *Director) executeWithRetry(ctx context.Context, userInput string, world
 
 // getActionLabel returns the appropriate action label for logging and prompts.
 func getActionLabel(actingNPCID string) string {
-	if actingNPCID != "" {
-		return fmt.Sprintf("NPC %s ACTION", strings.ToUpper(actingNPCID))
-	}
-	return "Player action"
+    if actingNPCID != "" {
+        return fmt.Sprintf("NPC %s ACTION", strings.ToUpper(actingNPCID))
+    }
+    return "Player action"
+}
+
+// summarizeTurnEvents asks the LLM to produce short, human-readable event lines
+// that describe what happened this turn, including successes, non-mutating actions,
+// and failures. No invented events.
+func (d *Director) summarizeTurnEvents(ctx context.Context, userInput, npcID string, oldWorld, newWorld game.WorldState, successes, failures []string) []string {
+    tracer := otel.Tracer("events")
+    ctx, span := tracer.Start(ctx, "events.summarize")
+    defer span.End()
+
+    actor := "PLAYER"
+    if npcID != "" {
+        actor = strings.ToUpper(npcID)
+    }
+
+    worldDeltaHint := ""
+    if oldWorld.Location != newWorld.Location {
+        worldDeltaHint = fmt.Sprintf("Location changed: %s -> %s", oldWorld.Location, newWorld.Location)
+    }
+
+    sb := &strings.Builder{}
+    fmt.Fprintf(sb, "ACTOR: %s\nINPUT: %s\n", actor, userInput)
+    if len(successes) > 0 {
+        fmt.Fprintf(sb, "SUCCESSES:\n%s\n", strings.Join(successes, "\n"))
+    }
+    if len(failures) > 0 {
+        fmt.Fprintf(sb, "FAILURES:\n%s\n", strings.Join(failures, "\n"))
+    }
+    if worldDeltaHint != "" {
+        fmt.Fprintf(sb, "WORLD HINT: %s\n", worldDeltaHint)
+    }
+
+    req := llm.JSONCompletionRequest{
+        SystemPrompt: `You summarize the outcome of a single game turn.
+Return a JSON array of short, human-readable lines describing what actually happened this turn.
+Use present tense. Do not invent events. It's OK if some lines describe attempts that didn't change state (like examining).` ,
+        UserPrompt:   sb.String(),
+        MaxTokens:    120,
+    }
+
+    // Tag this as an event summarization op
+    ctx = llm.WithOperationType(ctx, "events.summarize")
+    content, err := d.llmService.CompleteJSON(ctx, req)
+    if err != nil {
+        if d.debugLogger != nil {
+            d.debugLogger.Printf("event summarization failed: %v", err)
+        }
+        // Fallback: derive lines from successes/failures/user input conservatively
+        lines := []string{}
+        if userInput != "" {
+            if npcID != "" {
+                lines = append(lines, fmt.Sprintf("%s: %s", actor, userInput))
+            } else {
+                lines = append(lines, fmt.Sprintf("Player: %s", userInput))
+            }
+        }
+        for _, s := range successes {
+            lines = append(lines, s)
+        }
+        for _, f := range failures {
+            lines = append(lines, f)
+        }
+        return lines
+    }
+    var arr []string
+    if jerr := json.Unmarshal([]byte(content), &arr); jerr != nil {
+        if d.debugLogger != nil {
+            d.debugLogger.Printf("event summarization JSON parse failed: %v", jerr)
+        }
+        return []string{}
+    }
+    return arr
 }

@@ -1,6 +1,9 @@
 package actors
 
-import "fmt"
+import (
+    "fmt"
+    "strings"
+)
 
 func buildThoughtsPrompt(npcID string, recentThoughts []string, recentActions []string, personality string, backstory string, coreMemories []string) string {
 	memoryContext := ""
@@ -51,6 +54,93 @@ Think like an actual human mind:
 Return only realistic internal thoughts, nothing else. Keep it to one line.`, npcID, npcID, personalityContext, backstoryContext, coreMemoryContext, memoryContext)
 }
 
+// buildThoughtsPromptXML produces a clearer, sectioned system prompt for NPC thinking.
+// It uses simple XML-like tags to make parsing and emphasis reliable.
+func buildThoughtsPromptXML(npcID string, recentThoughts []string, recentActions []string, personality string, backstory string, coreMemories []string) string {
+    b := &strings.Builder{}
+    fmt.Fprintf(b, `You are %s. Generate a single internal thought based on your current situation.`, npcID)
+    b.WriteString("\n\n<character>\n")
+    fmt.Fprintf(b, "- name: %s\n", npcID)
+    if strings.TrimSpace(personality) != "" {
+        fmt.Fprintf(b, "- personality: %s\n", personality)
+    }
+    if strings.TrimSpace(backstory) != "" {
+        fmt.Fprintf(b, "- backstory: %s\n", backstory)
+    }
+    if len(coreMemories) > 0 {
+        b.WriteString("- core_memories:\n")
+        for _, m := range coreMemories {
+            fmt.Fprintf(b, "  - %s\n", m)
+        }
+    }
+    b.WriteString("</character>\n\n")
+
+    b.WriteString("<recent_memory>\n")
+    if len(recentThoughts) > 0 {
+        b.WriteString("- thoughts:\n")
+        for _, t := range recentThoughts {
+            fmt.Fprintf(b, "  - %s\n", t)
+        }
+    }
+    if len(recentActions) > 0 {
+        b.WriteString("- actions:\n")
+        for _, a := range recentActions {
+            fmt.Fprintf(b, "  - %s\n", a)
+        }
+    }
+    b.WriteString("</recent_memory>\n\n")
+
+    b.WriteString(`<style>
+- one line only
+- present tense; natural and practical
+- base only on world_context and perceived_events
+- no quotes; no role labels; no narration
+- avoid repeating identical prior thoughts; build on change
+- it's fine to be uncertain or to simply observe; don't force a plan
+</style>`)        
+    return b.String()
+}
+
+// buildNPCThoughtsUserXML wraps the dynamic context for the NPC think step.
+func buildNPCThoughtsUserXML(worldContext string, perceivedLines []string, situation string) string {
+    b := &strings.Builder{}
+    b.WriteString("<world_context>\n")
+    b.WriteString(strings.TrimSpace(worldContext))
+    b.WriteString("\n</world_context>\n\n")
+    if strings.TrimSpace(situation) != "" {
+        b.WriteString("<situation>\n")
+        b.WriteString(strings.TrimSpace(situation))
+        b.WriteString("\n</situation>\n\n")
+    }
+    b.WriteString("<perceived_events>\n")
+    for _, ev := range perceivedLines {
+        fmt.Fprintf(b, "- %s\n", strings.TrimSpace(ev))
+    }
+    b.WriteString("</perceived_events>")
+    return b.String()
+}
+
+// buildNPCSituationUser builds the user prompt for situation summarization
+func buildNPCSituationUser(worldContext string, perceivedLines []string) string {
+    b := &strings.Builder{}
+    b.WriteString("<world_context>\n")
+    b.WriteString(strings.TrimSpace(worldContext))
+    b.WriteString("\n</world_context>\n\n")
+    b.WriteString("<perceived_events>\n")
+    for _, ev := range perceivedLines {
+        fmt.Fprintf(b, "- %s\n", strings.TrimSpace(ev))
+    }
+    b.WriteString("</perceived_events>")
+    return b.String()
+}
+
+func xmlLineIf(tag, val string) string {
+    if strings.TrimSpace(val) == "" {
+        return ""
+    }
+    return fmt.Sprintf("<%s>%s</%s>", tag, val, tag)
+}
+
 func buildActionPrompt(npcID string, npcThoughts string, recentActions []string, personality string, backstory string) string {
 	memoryContext := ""
 	if len(recentActions) > 0 {
@@ -67,13 +157,13 @@ func buildActionPrompt(npcID string, npcThoughts string, recentActions []string,
 		backstoryContext = fmt.Sprintf("- Background: %s\n", backstory)
 	}
 
-	return fmt.Sprintf(`You are %s, an NPC in a text adventure game. Based on your thoughts and the current situation, decide what action to take.
+	return fmt.Sprintf(`You are %s. React realistically to your current situation — you don't have to "pick an action" every turn.
 
 Your character:
 - Name: %s
 %s%s- You act naturally based on what you've noticed and what you're thinking
-- You can move between rooms, pick up items, talk to people, or interact with objects
-- Take one action per turn that makes sense given your thoughts and the situation
+- You can move between rooms, talk to people, interact with objects, or simply pause to observe or think
+- Only act if it makes sense right now; it's valid to call out, look around, or do nothing
 
 Your current thoughts: "%s"%s
 
@@ -81,7 +171,8 @@ Based on your thoughts and the world state, what do you want to do? You can:
 - Move to a different room (e.g., "go to kitchen") 
 - Say something (e.g., "say Hello there!")
 - Pick up an item (e.g., "take key")
-- Look around or examine something
+- Look around or examine something (e.g., "look around", "examine desk")
+- Call out (e.g., "say Is someone there?")
 - Do nothing (return empty string)
 
 Return only a brief action statement, or an empty string if you don't want to act.`, npcID, npcID, personalityContext, backstoryContext, npcThoughts, memoryContext)
