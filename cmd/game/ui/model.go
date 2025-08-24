@@ -1,23 +1,22 @@
 package ui
 
 import (
-	"context"
-	"fmt"
-	"time"
-	
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-	
-	"textadventure/internal/debug"
-	"textadventure/internal/game"
-	"textadventure/internal/game/director"
-	"textadventure/internal/game/sensory"
-	"textadventure/internal/llm"
-	"textadventure/internal/logging"
-	"textadventure/internal/mcp"
+    "context"
+    "fmt"
+    "time"
+    
+    tea "github.com/charmbracelet/bubbletea"
+    "github.com/google/uuid"
+    "go.opentelemetry.io/otel"
+    "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/trace"
+    
+    "textadventure/internal/debug"
+    "textadventure/internal/game"
+    "textadventure/internal/game/director"
+    "textadventure/internal/llm"
+    "textadventure/internal/logging"
+    "textadventure/internal/mcp"
 )
 
 type GameLoggers struct {
@@ -65,7 +64,7 @@ type Model struct {
 	logger                  *logging.CompletionLogger
 	turnPhase               TurnPhase
 	npcTurnComplete         bool
-	accumulatedSensoryEvents []sensory.SensoryEvent
+    accumulatedWorldEvents  []string
     sessionID               string
     sessionStartTime        time.Time
     sessionContext          context.Context
@@ -119,7 +118,7 @@ func NewModel(
 		gameHistory:             game.NewHistory(6),
 		turnPhase:               PlayerTurn,
 		npcTurnComplete:         false,
-		accumulatedSensoryEvents: []sensory.SensoryEvent{},
+        accumulatedWorldEvents:  []string{},
 		sessionID:               sessionID,
         sessionStartTime:        sessionStartTime,
         sessionContext:          sessionCtx,
@@ -141,7 +140,7 @@ type animationTickMsg struct{}
 type initialLookAroundMsg struct{}
 
 type npcTurnMsg struct{
-	sensoryEvents *sensory.SensoryEventResponse
+    worldEventLines []string
 }
 
 type narrationTurnMsg struct {
@@ -158,10 +157,10 @@ func initialLookAroundCmd() tea.Cmd {
 	}
 }
 
-func npcTurnCmd(sensoryEvents *sensory.SensoryEventResponse) tea.Cmd {
-	return func() tea.Msg {
-		return npcTurnMsg{sensoryEvents: sensoryEvents}
-	}
+func npcTurnCmd(worldEventLines []string) tea.Cmd {
+    return func() tea.Msg {
+        return npcTurnMsg{worldEventLines: worldEventLines}
+    }
 }
 
 func startNarrationCmd(world game.WorldState, gameHistory []string, debug bool) tea.Cmd {

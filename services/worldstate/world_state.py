@@ -40,43 +40,43 @@ DEFAULT_WORLD_STATE = {
     "locations": {
         "foyer": {
             "title": "Old Foyer",
-            "description": "A dusty foyer with motes drifting in shafts of light",
-            "items": ["silver_key"],
+            "description": "Dust hangs in slanted light. A scuffed doormat sits by the threshold and an umbrella stand leans beside a coat rack.",
+            "items": ["silver_key", "umbrella_stand", "coat_rack", "side_table", "doormat"],
             "exits": {"north": "study", "east": "library", "west": "kitchen"},
             "door_states": {"north": {"locked": True, "description": "locked oak door"}}
         },
         "study": {
             "title": "Quiet Study", 
-            "description": "A quiet study with a heavy oak desk",
-            "items": ["brass_compass"],
+            "description": "A heavy oak desk faces a curtained window; papers and a fountain pen sit neatly arranged.",
+            "items": ["brass_compass", "fountain_pen", "letter_opener", "sealed_envelope", "blotting_paper"],
             "exits": {"south": "foyer", "up": "attic"},
             "door_states": {}
         },
         "library": {
             "title": "Dusty Library",
-            "description": "Towering bookshelves filled with ancient tomes and forgotten knowledge",
-            "items": ["leather_journal", "crystal_orb"],
+            "description": "Narrow aisles between tall shelves. A rolling step ladder rests against the stacks; a small reading table sits under a dim lamp.",
+            "items": ["leather_journal", "glass_paperweight", "step_ladder", "reading_glasses", "index_cards", "candle_stub"],
             "exits": {"west": "foyer"},
             "door_states": {}
         },
         "kitchen": {
             "title": "Abandoned Kitchen",
-            "description": "A once-grand kitchen now covered in dust and cobwebs",
-            "items": ["iron_pot"],
+            "description": "Cold stove, hanging utensils, and a faint smell of old spices. A trapdoor’s edges show wear near the center.",
+            "items": ["iron_pot", "dented_kettle", "chipped_mug", "hanging_ladle"],
             "exits": {"east": "foyer", "down": "cellar"},
             "door_states": {"down": {"locked": True, "description": "heavy wooden trapdoor"}}
         },
         "attic": {
             "title": "Cramped Attic",
-            "description": "A low-ceilinged space filled with forgotten memories and mysterious shadows",
-            "items": ["golden_locket"],
+            "description": "Low beams and sloping roof. Dusty crates and a moth-eaten blanket lie near a single round window.",
+            "items": ["golden_locket", "moth_eaten_blanket", "wooden_crate", "broken_frame"],
             "exits": {"down": "study"},
             "door_states": {}
         },
         "cellar": {
             "title": "Stone Cellar",
-            "description": "Cool stone walls lined with empty wine racks and mysterious alcoves",
-            "items": [],
+            "description": "Cool stone, low ceiling, and the scent of damp earth. An old wine rack leans against the wall.",
+            "items": ["dusty_bottle", "coal_scuttle", "rusted_hook"],
             "exits": {"up": "kitchen"},
             "door_states": {}
         }
@@ -97,19 +97,124 @@ DEFAULT_WORLD_STATE = {
             "description": "A weathered journal filled with cryptic notes and sketches",
             "can_unlock": []
         },
-        "crystal_orb": {
-            "title": "Crystal Orb",
-            "description": "A clear crystal sphere that seems to shimmer with inner light",
+        "glass_paperweight": {
+            "title": "Glass Paperweight",
+            "description": "A smooth, heavy glass paperweight with tiny air bubbles inside",
             "can_unlock": []
         },
         "iron_pot": {
             "title": "Iron Pot",
             "description": "A heavy cast iron pot, blackened with age",
-            "can_unlock": ["kitchen_down"]
+            "can_unlock": []
         },
         "golden_locket": {
             "title": "Golden Locket",
             "description": "An ornate locket that feels warm to the touch",
+            "can_unlock": []
+        },
+        "umbrella_stand": {
+            "title": "Umbrella Stand",
+            "description": "A wrought-iron stand with a faint ring of rust at its base",
+            "can_unlock": []
+        },
+        "coat_rack": {
+            "title": "Coat Rack",
+            "description": "A wooden rack with a couple of empty hooks",
+            "can_unlock": []
+        },
+        "side_table": {
+            "title": "Side Table",
+            "description": "A small table with a scratched surface",
+            "can_unlock": []
+        },
+        "doormat": {
+            "title": "Doormat",
+            "description": "A coir mat with a faded border",
+            "can_unlock": []
+        },
+        "fountain_pen": {
+            "title": "Fountain Pen",
+            "description": "A dark lacquer pen with a fine nib",
+            "can_unlock": []
+        },
+        "letter_opener": {
+            "title": "Letter Opener",
+            "description": "A brass letter opener shaped like a leaf",
+            "can_unlock": []
+        },
+        "sealed_envelope": {
+            "title": "Sealed Envelope",
+            "description": "A cream envelope sealed with burgundy wax",
+            "can_unlock": []
+        },
+        "blotting_paper": {
+            "title": "Blotting Paper",
+            "description": "A square of gently stained blotting paper",
+            "can_unlock": []
+        },
+        "step_ladder": {
+            "title": "Step Ladder",
+            "description": "A small rolling ladder for reaching high shelves",
+            "can_unlock": []
+        },
+        "reading_glasses": {
+            "title": "Reading Glasses",
+            "description": "Wire-framed glasses in need of a wipe",
+            "can_unlock": []
+        },
+        "index_cards": {
+            "title": "Index Cards",
+            "description": "A small stack of cards with penciled annotations",
+            "can_unlock": []
+        },
+        "candle_stub": {
+            "title": "Candle Stub",
+            "description": "A short candle with drips of cooled wax",
+            "can_unlock": []
+        },
+        "dented_kettle": {
+            "title": "Dented Kettle",
+            "description": "A tin kettle with a dented side",
+            "can_unlock": []
+        },
+        "chipped_mug": {
+            "title": "Chipped Mug",
+            "description": "A plain white mug with a chip on the rim",
+            "can_unlock": []
+        },
+        "hanging_ladle": {
+            "title": "Hanging Ladle",
+            "description": "A steel ladle with a looped handle",
+            "can_unlock": []
+        },
+        "moth_eaten_blanket": {
+            "title": "Moth-Eaten Blanket",
+            "description": "A thin wool blanket with small holes",
+            "can_unlock": []
+        },
+        "wooden_crate": {
+            "title": "Wooden Crate",
+            "description": "A light crate with a loose slat",
+            "can_unlock": []
+        },
+        "broken_frame": {
+            "title": "Broken Frame",
+            "description": "A cracked picture frame without its glass",
+            "can_unlock": []
+        },
+        "dusty_bottle": {
+            "title": "Dusty Bottle",
+            "description": "An unlabeled green bottle coated in dust",
+            "can_unlock": []
+        },
+        "coal_scuttle": {
+            "title": "Coal Scuttle",
+            "description": "A small metal scuttle with a wooden handle",
+            "can_unlock": []
+        },
+        "rusted_hook": {
+            "title": "Rusted Hook",
+            "description": "An old iron hook fixed to a beam",
             "can_unlock": []
         }
     },
@@ -117,17 +222,13 @@ DEFAULT_WORLD_STATE = {
         "elena": {
             "location": "library",
             "debug_color": "35",
-            "description": "a woman in her thirties with dark hair pulled back, wearing a simple gray dress",
+            "description": "a woman in her thirties with dark hair loose and slightly disheveled, wearing a simple gray dress",
             "inventory": [],
             "recent_thoughts": [],
             "recent_actions": [],
-            "personality": "cautious and knowledgeable",
-            "backstory": "A librarian and keeper of this old manor's secrets, Elena has been here for years cataloging its mysteries.",
-            "core_memories": [
-                "The manor holds dangerous secrets that must be protected from the unprepared",
-                "Trust must be earned slowly - too many have sought the forbidden knowledge",
-                "The locked doors exist for good reason"
-            ]
+            "personality": "curious and observant, pragmatic under pressure, empathetic but guarded",
+            "backstory": "She has just woken up inside the manor and cannot remember who she is or how she got there.",
+            "core_memories": []
         }
     }
 }

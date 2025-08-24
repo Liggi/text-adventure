@@ -59,65 +59,67 @@ func BuildWorldContext(world WorldState, gameHistory []string, actingNPCID ...st
 	if len(actingNPCID) > 0 && actingNPCID[0] != "" {
 		// NPC perspective
 		npcID := actingNPCID[0]
-		if npc, exists := world.NPCs[npcID]; exists {
-			currentLoc := world.Locations[npc.Location]
-			context.WriteString(fmt.Sprintf("NPC %s Location: %s (%s)\n", npcID, currentLoc.Title, npc.Location))
-			context.WriteString(currentLoc.Description + "\n")
-			context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
-			context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
-			
-			// Show co-location with player
-			if world.Location == npc.Location {
-				context.WriteString("Player is also here\n")
-				context.WriteString(fmt.Sprintf("Player Inventory: %v\n", world.Inventory))
-			}
-			
-			// Show other NPCs at this location
-			var otherNPCs []string
-			for otherNPCID, otherNPC := range world.NPCs {
-				if otherNPCID != npcID && otherNPC.Location == npc.Location {
-					otherNPCs = append(otherNPCs, otherNPCID)
-				}
-			}
-			if len(otherNPCs) > 0 {
-				context.WriteString(fmt.Sprintf("Other NPCs here: %v\n", otherNPCs))
-			}
-		}
+        if npc, exists := world.NPCs[npcID]; exists {
+            currentLoc := world.Locations[npc.Location]
+            context.WriteString(fmt.Sprintf("NPC %s Location: %s (%s)\n", npcID, currentLoc.Title, npc.Location))
+            context.WriteString(currentLoc.Description + "\n")
+
+            // People context first
+            if world.Location == npc.Location {
+                context.WriteString("Player is also here\n")
+                context.WriteString(fmt.Sprintf("Player Inventory: %v\n", world.Inventory))
+            }
+            var otherNPCs []string
+            for otherNPCID, otherNPC := range world.NPCs {
+                if otherNPCID != npcID && otherNPC.Location == npc.Location {
+                    otherNPCs = append(otherNPCs, otherNPCID)
+                }
+            }
+            if len(otherNPCs) > 0 {
+                context.WriteString(fmt.Sprintf("Other NPCs here: %v\n", otherNPCs))
+            }
+
+            // Navigation next
+            context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
+
+            // Items last (least salient)
+            context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
+        }
 	} else {
 		// Player perspective
 		currentLoc := world.Locations[world.Location]
 		context.WriteString("Player Location: " + currentLoc.Title + " (" + world.Location + ")\n")
-		context.WriteString(currentLoc.Description + "\n")
-		context.WriteString(fmt.Sprintf("Player Inventory: %v\n", world.Inventory))
-		context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
-		context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
-		
-		// Show NPCs at player's location (respecting met status for narrative consistency)
-		var npcsHere []string
-		for npcID, npc := range world.NPCs {
-			if npc.Location == world.Location {
-				met := false
-				for _, metNPC := range world.MetNPCs {
-					if metNPC == npcID {
-						met = true
-						break
-					}
-				}
-				
-				if met {
-					npcsHere = append(npcsHere, npcID)
-				} else {
-					description := npc.Description
-					if description == "" {
-						description = "someone"
-					}
-					npcsHere = append(npcsHere, description)
-				}
-			}
-		}
-		if len(npcsHere) > 0 {
-			context.WriteString(fmt.Sprintf("People here: %v\n", npcsHere))
-		}
+        context.WriteString(currentLoc.Description + "\n")
+        // People context first
+        var npcsHere []string
+        for npcID, npc := range world.NPCs {
+            if npc.Location == world.Location {
+                met := false
+                for _, metNPC := range world.MetNPCs {
+                    if metNPC == npcID {
+                        met = true
+                        break
+                    }
+                }
+                if met {
+                    npcsHere = append(npcsHere, npcID)
+                } else {
+                    description := npc.Description
+                    if description == "" {
+                        description = "someone"
+                    }
+                    npcsHere = append(npcsHere, description)
+                }
+            }
+        }
+        if len(npcsHere) > 0 {
+            context.WriteString(fmt.Sprintf("People here: %v\n", npcsHere))
+        }
+        // Navigation next
+        context.WriteString(fmt.Sprintf("Available Exits: %v\n", currentLoc.Exits))
+        // Inventory and items last
+        context.WriteString(fmt.Sprintf("Player Inventory: %v\n", world.Inventory))
+        context.WriteString(fmt.Sprintf("Available Items Here: %v\n", currentLoc.Items))
 	}
 	
 	

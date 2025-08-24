@@ -11,7 +11,6 @@ import (
     "github.com/sashabaranov/go-openai"
 
     "textadventure/internal/game"
-    "textadventure/internal/game/sensory"
     "textadventure/internal/llm"
     "textadventure/internal/logging"
     "go.opentelemetry.io/otel"
@@ -28,7 +27,7 @@ type StreamStartedMsg struct {
     SystemPrompt  string
     StartTime     time.Time
     Logger        *logging.CompletionLogger
-    SensoryEvents *sensory.SensoryEventResponse
+    WorldEventLines []string
     Span          trace.Span
 }
 
@@ -49,12 +48,12 @@ type StreamCompleteMsg struct {
     StartTime     time.Time
     Logger        *logging.CompletionLogger
     Debug         bool
-    SensoryEvents *sensory.SensoryEventResponse
+    WorldEventLines []string
     Span          trace.Span
 }
 
 // StartLLMStream initiates a streaming narration response
-func StartLLMStream(ctx context.Context, llmService *llm.Service, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, actionContext string, mutationResults []string, sensoryEvents *sensory.SensoryEventResponse, actingNPCID ...string) tea.Cmd {
+func StartLLMStream(ctx context.Context, llmService *llm.Service, userInput string, world game.WorldState, gameHistory []string, logger *logging.CompletionLogger, debug bool, actionContext string, mutationResults []string, worldEventLines []string, actingNPCID ...string) tea.Cmd {
     return func() tea.Msg {
         if debug {
             log.Printf("Starting LLM stream with input: %q", userInput)
@@ -62,7 +61,7 @@ func StartLLMStream(ctx context.Context, llmService *llm.Service, userInput stri
         
         startTime := time.Now()
         worldContext := game.BuildWorldContext(world, gameHistory, actingNPCID...)
-        systemPrompt := buildNarrationPrompt(actionContext, mutationResults, sensoryEvents)
+        systemPrompt := buildNarrationPrompt(actionContext, mutationResults, worldEventLines)
         
         req := llm.StreamCompletionRequest{
             SystemPrompt: systemPrompt,
@@ -101,7 +100,7 @@ func StartLLMStream(ctx context.Context, llmService *llm.Service, userInput stri
             SystemPrompt:  systemPrompt,
             StartTime:     startTime,
             Logger:        logger,
-            SensoryEvents: sensoryEvents,
+            WorldEventLines: worldEventLines,
             Span:          span,
         }
     }
@@ -138,7 +137,7 @@ func ReadNextChunk(stream *openai.ChatCompletionStream, debug bool, completionCt
                 StartTime:     completionCtx.StartTime,
                 Logger:        completionCtx.Logger,
                 Debug:         debug,
-                SensoryEvents: completionCtx.SensoryEvents,
+                WorldEventLines:   completionCtx.WorldEventLines,
                 Span:          completionCtx.Span,
             }
         }

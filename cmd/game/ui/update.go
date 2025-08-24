@@ -12,7 +12,6 @@ import (
     "textadventure/internal/game/actors"
     "textadventure/internal/game/director"
     "textadventure/internal/game/narration"
-    "textadventure/internal/game/sensory"
     "go.opentelemetry.io/otel/attribute"
 )
 
@@ -74,7 +73,7 @@ func (m Model) handleNPCTurn(msg npcTurnMsg) (tea.Model, tea.Cmd) {
         m.npcTurnComplete = true
         // Enrich turn context with game/session info for NPC flows
         npcCtx := m.createGameContext(m.turnContext, "npc.turn")
-        return m, actors.GenerateNPCTurn(npcCtx, m.llmService, "elena", m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled(), msg.sensoryEvents)
+        return m, actors.GenerateNPCTurn(npcCtx, m.llmService, "elena", m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled(), msg.worldEventLines)
     }
     return m, nil
 }
@@ -225,7 +224,6 @@ func (m Model) handleStreamComplete(msg narration.StreamCompleteMsg) (tea.Model,
 
         if m.turnPhase == Narration {
             m.turnPhase = PlayerTurn
-            m.accumulatedSensoryEvents = []sensory.SensoryEvent{}
             // End the turn span as narration completes the turn
             (&m).endTurn("narration_complete")
         }
@@ -289,75 +287,46 @@ func (m Model) handleMutationsGenerated(msg director.MutationsGeneratedMsg) (tea
 			}
 		}
 		
-		if msg.Debug && msg.SensoryEvents != nil {
-			actorLabel := "PLAYER"
-			if msg.ActingNPCID != "" {
-				actorLabel = strings.ToUpper(msg.ActingNPCID)
-			}
-			
-			if len(msg.SensoryEvents.AuditoryEvents) > 0 {
-				sensoryHeader := fmt.Sprintf("\033[36m[%s SENSORY EVENTS]\033[0m", actorLabel)
-				m.messages = append(m.messages, sensoryHeader)
-				for _, event := range msg.SensoryEvents.AuditoryEvents {
-					eventMsg := fmt.Sprintf("\033[36m  🔊 %s (%s) at %s\033[0m", event.Description, event.Volume, event.Location)
-					m.messages = append(m.messages, eventMsg)
-				}
-			} else {
-				sensoryHeader := fmt.Sprintf("\033[36m[%s SENSORY EVENTS] No auditory events\033[0m", actorLabel)
-				m.messages = append(m.messages, sensoryHeader)
-			}
-		}
+        if msg.Debug && len(msg.WorldEventLines) > 0 {
+            actorLabel := "PLAYER"
+            if msg.ActingNPCID != "" {
+                actorLabel = strings.ToUpper(msg.ActingNPCID)
+            }
+            
+            header := fmt.Sprintf("\033[36m[%s WORLD EVENTS]\033[0m", actorLabel)
+            m.messages = append(m.messages, header)
+            for _, line := range msg.WorldEventLines {
+                eventMsg := fmt.Sprintf("\033[36m  %s\033[0m", line)
+                m.messages = append(m.messages, eventMsg)
+            }
+        }
 		
-		if msg.Debug && (len(msg.Mutations) > 0 || msg.SensoryEvents != nil) {
-			m.messages = append(m.messages, "")
-		}
-		
-		if msg.SensoryEvents != nil {
-			m.accumulatedSensoryEvents = append(m.accumulatedSensoryEvents, msg.SensoryEvents.AuditoryEvents...)
-		}
+        if msg.Debug && (len(msg.Mutations) > 0 || len(msg.WorldEventLines) > 0) {
+            m.messages = append(m.messages, "")
+        }
+        
+        // no accumulation needed for event lines
 		
 		if m.turnPhase == Narration {
 			m.messages = append(m.messages, "LOADING_ANIMATION")
 			
-			// Filter sensory events for narrator to prevent duplication with action context
-			var narratorSensoryEvents []sensory.SensoryEvent
-			if msg.ActingNPCID != "" {
-				narratorSensoryEvents = m.accumulatedSensoryEvents
-			} else {
-				// Player acted: exclude sensory events from player's location to avoid "PLAYER: Hello" + "someone shouted Hello"
-				if m.loggers.Debug.IsEnabled() {
-					m.loggers.Debug.Printf("Filtering sensory events for narrator. Player location: %s", m.world.Location)
-					m.loggers.Debug.Printf("Total accumulated events: %d", len(m.accumulatedSensoryEvents))
-					for i, event := range m.accumulatedSensoryEvents {
-						m.loggers.Debug.Printf("  Event %d: %s at %s (excluding: %v)", i, event.Description, event.Location, event.Location == m.world.Location)
-					}
-				}
-				for _, event := range m.accumulatedSensoryEvents {
-					if event.Location != m.world.Location {
-						narratorSensoryEvents = append(narratorSensoryEvents, event)
-					}
-				}
-				if m.loggers.Debug.IsEnabled() {
-					m.loggers.Debug.Printf("Events passed to narrator: %d", len(narratorSensoryEvents))
-				}
-			}
-			
-            combinedEvents := &sensory.SensoryEventResponse{AuditoryEvents: narratorSensoryEvents}
+            // Narration uses world events (omniscient view) for this turn
             narrCtx := m.createGameContext(m.turnContext, "narration.generate")
-            return m, narration.StartLLMStream(narrCtx, m.llmService, msg.UserInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, m.loggers.Debug.IsEnabled(), msg.ActionContext, msg.Successes, combinedEvents, msg.ActingNPCID)
-		} else {
-			m.loading = false
-			
-			switch m.turnPhase {
-			case PlayerTurn:
-				m.turnPhase = NPCTurns
-				m.npcTurnComplete = false
-				return m, npcTurnCmd(msg.SensoryEvents)
-			case NPCTurns:
-				m.turnPhase = Narration
-				m.npcTurnComplete = false
-				return m, startNarrationCmd(m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled())
-			default:
+            return m, narration.StartLLMStream(narrCtx, m.llmService, msg.UserInput, m.world, m.gameHistory.GetEntries(), m.loggers.Completion, m.loggers.Debug.IsEnabled(), msg.ActionContext, msg.Successes, msg.WorldEventLines, msg.ActingNPCID)
+        } else {
+            m.loading = false
+            
+            switch m.turnPhase {
+            case PlayerTurn:
+                m.turnPhase = NPCTurns
+                m.npcTurnComplete = false
+                // Compute perceptions for NPC in next step
+                return m, npcTurnCmd(msg.WorldEventLines)
+            case NPCTurns:
+                m.turnPhase = Narration
+                m.npcTurnComplete = false
+                return m, startNarrationCmd(m.world, m.gameHistory.GetEntries(), m.loggers.Debug.IsEnabled())
+            default:
 				return m, nil
 			}
 		}

@@ -1,9 +1,10 @@
 package llm
 
 import (
-	"context"
-	"fmt"
-	"time"
+    "context"
+    "fmt"
+    "time"
+    "strings"
 
 	"github.com/sashabaranov/go-openai"
 	"go.opentelemetry.io/otel"
@@ -39,21 +40,24 @@ func NewService(apiKey string, debug *debug.Logger) *Service {
 }
 
 type TextCompletionRequest struct {
-	SystemPrompt string
-	UserPrompt   string
-	MaxTokens    int
+    SystemPrompt string
+    UserPrompt   string
+    MaxTokens    int
+    Model        string // optional override
 }
 
 type JSONCompletionRequest struct {
-	SystemPrompt string
-	UserPrompt   string
-	MaxTokens    int
+    SystemPrompt string
+    UserPrompt   string
+    MaxTokens    int
+    Model        string // optional override
 }
 
 type StreamCompletionRequest struct {
-	SystemPrompt string
-	UserPrompt   string
-	MaxTokens    int
+    SystemPrompt string
+    UserPrompt   string
+    MaxTokens    int
+    Model        string // optional override
 }
 
 func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (string, error) {
@@ -75,10 +79,14 @@ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (
     if spanName == "" {
         spanName = "llm.complete_text"
     }
+    model := s.model
+    if strings.TrimSpace(req.Model) != "" {
+        model = req.Model
+    }
     ctx, span := s.tracer.Start(ctx, spanName,
         trace.WithSpanKind(trace.SpanKindClient),
         trace.WithAttributes(
-            observability.CreateGenAIAttributes("openai", s.model, 0, 0, 0.0)...,
+            observability.CreateGenAIAttributes("openai", model, 0, 0, 0.0)...,
         ),
     )
 	defer span.End()
@@ -118,8 +126,8 @@ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (
 
 	startTime := time.Now()
 
-	openaiReq := openai.ChatCompletionRequest{
-		Model: s.model,
+    openaiReq := openai.ChatCompletionRequest{
+        Model: model,
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    openai.ChatMessageRoleSystem,
@@ -164,7 +172,7 @@ func (s *Service) CompleteText(ctx context.Context, req TextCompletionRequest) (
         attribute.String("langfuse.observation.input", req.SystemPrompt+"\n\n"+req.UserPrompt),
         attribute.String("langfuse.observation.output", content),
         attribute.String("langfuse.observation.output_format", "text"),
-        attribute.String("langfuse.observation.model.name", s.model),
+        attribute.String("langfuse.observation.model.name", model),
     )
 
 	span.AddEvent("gen_ai.choice", trace.WithAttributes(
@@ -199,10 +207,14 @@ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (
     if spanName == "" {
         spanName = "llm.complete_json"
     }
+    model := s.model
+    if strings.TrimSpace(req.Model) != "" {
+        model = req.Model
+    }
     ctx, span := s.tracer.Start(ctx, spanName,
         trace.WithSpanKind(trace.SpanKindClient),
         trace.WithAttributes(
-            observability.CreateGenAIAttributes("openai", s.model, 0, 0, 0.0)...,
+            observability.CreateGenAIAttributes("openai", model, 0, 0, 0.0)...,
         ),
     )
 	defer span.End()
@@ -243,8 +255,8 @@ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (
 
 	startTime := time.Now()
 
-	openaiReq := openai.ChatCompletionRequest{
-		Model: s.model,
+    openaiReq := openai.ChatCompletionRequest{
+        Model: model,
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    openai.ChatMessageRoleSystem,
@@ -292,7 +304,7 @@ func (s *Service) CompleteJSON(ctx context.Context, req JSONCompletionRequest) (
         attribute.String("langfuse.observation.input", req.SystemPrompt+"\n\n"+req.UserPrompt),
         attribute.String("langfuse.observation.output", content),
         attribute.String("langfuse.observation.output_format", "json"),
-        attribute.String("langfuse.observation.model.name", s.model),
+        attribute.String("langfuse.observation.model.name", model),
     )
 
 	span.AddEvent("gen_ai.choice", trace.WithAttributes(
@@ -375,8 +387,12 @@ func CopyGameContextToSpan(ctx context.Context, span trace.Span) {
 }
 
 func (s *Service) CompleteStream(ctx context.Context, req StreamCompletionRequest) (*openai.ChatCompletionStream, error) {
-	openaiReq := openai.ChatCompletionRequest{
-		Model: s.model,
+    model := s.model
+    if strings.TrimSpace(req.Model) != "" {
+        model = req.Model
+    }
+    openaiReq := openai.ChatCompletionRequest{
+        Model: model,
 		Messages: []openai.ChatCompletionMessage{
 			{
 				Role:    openai.ChatMessageRoleSystem,
