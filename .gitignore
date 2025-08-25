@@ -7,4 +7,4 @@ completions.db
 world_state.json
 mcp-server/.venv/
 mcp-server/__pycache__/
-.claude/
+.claude/.ipynb_checkpoints/
