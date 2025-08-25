@@ -2,6 +2,7 @@ package director
 
 import (
 	"fmt"
+	"strings"
 	
 	"textadventure/internal/game"
 )
@@ -50,4 +51,17 @@ func buildDirectorPrompt(toolDescriptions string, world game.WorldState, gameHis
 ]}
 </example_output>
 `, toolDescriptions, game.BuildWorldContext(world, gameHistory, actingNPCID), actionLabel, movementGuideline, pickupGuidelines, exampleDestination)
+}
+
+func getCoreDirectorTools() string {
+	coreTools := []string{
+		"move_player(location: string) - Move the player to a specific location",
+		"move_npc(npc_id: string, location: string) - Move an NPC to a specific location", 
+		"transfer_item(item: string, from_location: string, to_location: string) - Move an item between locations or entities",
+		"add_to_inventory(item: string) - Add an item from current location to player's inventory",
+		"remove_from_inventory(item: string) - Remove an item from player's inventory to current location",
+		"mark_npc_as_met(npc_id: string) - Mark that the player has met and learned an NPC's name",
+	}
+	
+	return strings.Join(coreTools, "\n")
 }

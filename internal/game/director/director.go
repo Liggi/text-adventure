@@ -131,17 +131,16 @@ type MutationsGeneratedMsg struct {
 // It analyzes the user's intent in the context of the current world state and returns
 // a plan containing the specific MCP tool mutations needed to fulfill that intent.
 func (d *Director) InterpretIntent(ctx context.Context, userInput string, world game.WorldState, gameHistory []string, actingNPCID string) (*ActionPlan, error) {
-    toolDescriptions, err := d.mcpClient.ListTools(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tool descriptions from MCP server: %w", err)
-	}
+    toolDescriptions := getCoreDirectorTools()
 
 	actionLabel := getActionLabel(actingNPCID)
 	
 	req := llm.JSONCompletionRequest{
-		SystemPrompt: buildDirectorPrompt(toolDescriptions, world, gameHistory, actionLabel, actingNPCID),
-		UserPrompt:   fmt.Sprintf("%s: %s", actionLabel, userInput),
-		MaxTokens:    2000,
+		SystemPrompt:    buildDirectorPrompt(toolDescriptions, world, gameHistory, actionLabel, actingNPCID),
+		UserPrompt:      fmt.Sprintf("%s: %s", actionLabel, userInput),
+		MaxTokens:       2000,
+		Model:           "gpt-5-mini",
+		ReasoningEffort: "minimal",
 	}
 
     content, err := d.llmService.CompleteJSON(ctx, req)
